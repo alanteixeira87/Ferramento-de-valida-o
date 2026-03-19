@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QA Analytics - Open Finance</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+
+    <div id="loginScreen" class="login-wrapper">
+        <div class="login-box">
+            <div class="topbar-brand justify-center mb-4">
+                <span class="logo-icon">⚡</span>
+                <h1>QA Analytics</h1>
+            </div>
+            <p class="login-subtitle">Acesso restrito ao time de Qualidade.</p>
+            
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="passwordInput">Senha de Acesso</label>
+                    <input type="password" id="passwordInput" placeholder="Digite a senha..." required>
+                </div>
+                <button type="submit" class="btn-primary w-full">Entrar no Dashboard</button>
+                <p id="loginError" class="login-error" style="display: none;">Senha incorreta. Tente novamente.</p>
+            </form>
+        </div>
+    </div>
+
+    <div id="mainApp" style="display: none;">
+        <header class="topbar">
+            <div class="topbar-brand">
+                <span class="logo-icon">⚡</span>
+                <h1>QA Analytics <span class="badge">Open Finance</span></h1>
+            </div>
+            <button id="logoutBtn" class="btn-outline">Sair</button>
+        </header>
+
+        <main class="container">
+            <section class="upload-section">
+                <div id="dropZone" class="drop-zone">
+                    <div class="drop-content">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary); margin-bottom: 16px;">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <h2>Arraste e solte os arquivos .zip</h2>
+                        <p>Ou clique para procurar em sua máquina</p>
+                        <input type="file" id="fileInput" accept=".zip" multiple>
+                        <button id="uploadBtn" class="btn-primary">Selecionar Arquivos</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="results-section">
+                <div id="resultsContainer">
+                    <div class="empty-state">
+                        <p>Nenhum log processado ainda. Aguardando envio...</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
