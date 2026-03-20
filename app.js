@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// LÓGICA DE LOGIN E INJEÇÃO DO MODAL (LIGHTBOX)
+// LÓGICA DE LOGIN (GATEKEEPER FRONT-END)
 // -------------------------------------------------------------
 const loginForm = document.getElementById('loginForm');
 const passwordInput = document.getElementById('passwordInput');
@@ -32,7 +32,9 @@ if(logoutBtn) {
     });
 }
 
-// INJETANDO O MODAL NO DOM DINAMICAMENTE
+// -------------------------------------------------------------
+// INJETANDO O MODAL NO DOM DINAMICAMENTE (LIGHTBOX)
+// -------------------------------------------------------------
 const modalHTML = `
 <div id="lightboxModal" class="lightbox-modal">
     <span id="lightboxClose" class="lightbox-close">&times;</span>
@@ -50,7 +52,7 @@ const lightboxClose = document.getElementById('lightboxClose');
 const lightboxPrev = document.getElementById('lightboxPrev');
 const lightboxNext = document.getElementById('lightboxNext');
 
-window.evidenceGalleries = {}; // Guarda as imagens de cada teste
+window.evidenceGalleries = {}; 
 let currentGalleryId = null;
 let currentImageIndex = 0;
 
@@ -86,7 +88,7 @@ lightboxNext.addEventListener('click', (e) => {
     updateLightbox();
 });
 
-// Suporte a Teclado (Seta Direita, Esquerda e ESC)
+// Suporte a Teclado
 document.addEventListener('keydown', (e) => {
     if (!lightboxModal.classList.contains('active')) return;
     if (e.key === 'Escape') lightboxModal.classList.remove('active');
@@ -147,7 +149,7 @@ async function processFiles(files) {
 }
 
 // -------------------------------------------------------------
-// EXTRAÇÃO DE EVIDÊNCIAS E GERAÇÃO DE MINIATURAS (Thumbnails)
+// EXTRAÇÃO DE EVIDÊNCIAS E GERAÇÃO DE MINIATURAS
 // -------------------------------------------------------------
 async function checkNokEvidences(zip, filePaths) {
     const imagensExtraidas = [];
@@ -215,7 +217,21 @@ function extractMetadata(htmlString) {
         if (matchNested) cnpjDaInstituicao = matchNested[1].trim();
     }
 
-    // SANITIZAÇÃO
+    // USER-AGENT (Dispositivo)
+    let userAgentMatch = htmlString.match(/<td class="more-key">user-agent<\/td>[\s\S]*?<pre[^>]*>([^<]+)<\/pre>/i);
+    let userAgentRaw = userAgentMatch ? userAgentMatch[1].trim() : extractJson("user-agent");
+    
+    let deviceLabel = "Não detetado";
+    if (userAgentRaw !== "Não encontrado") {
+        let ua = userAgentRaw.toLowerCase();
+        if (ua.includes("android")) deviceLabel = "🤖 Android";
+        else if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ios") || ua.includes("darwin")) deviceLabel = "🍎 iOS";
+        else if (ua.includes("windows") || ua.includes("macintosh") || ua.includes("linux")) deviceLabel = "💻 Desktop";
+        else if (ua.includes("postman") || ua.includes("insomnia") || ua.includes("axios")) deviceLabel = "⚙️ API Client";
+        else deviceLabel = "🌐 Outro";
+    }
+
+    // SANITIZAÇÃO (Bloqueia o CNPJ de credor conflitante)
     let htmlSanitizado = htmlString
         .replace(/63602987000134/g, "")
         .replace(/creditorCpfCnpj/gi, "");
@@ -224,7 +240,8 @@ function extractMetadata(htmlString) {
     const temBrazilCnpj = /brazilCNPJ/i.test(htmlSanitizado);
 
     return { 
-        alias, asId, cnpj: cnpjDaInstituicao, institutionName, temBusinessEntity, temBrazilCnpj 
+        alias, asId, cnpj: cnpjDaInstituicao, institutionName, 
+        temBusinessEntity, temBrazilCnpj, device: deviceLabel 
     };
 }
 
@@ -240,6 +257,7 @@ function analyzeFvpLogs(htmlString) {
         if (erroLimpo) resultados.push({ summary: erroLimpo });
     }
 
+    // Avaliação de Status Simplificada (Sucesso, Falha ou Interrompido)
     if (isInterrupted && resultados.length === 0) {
         resultados.push({ isInterrupted: true, summary: "O módulo de teste foi INTERROMPIDO fatalmente pelo FVP. (Ex: Timeout de requisição ou falha 500 no ambiente)" });
     } else if (resultados.length === 0) {
@@ -250,7 +268,7 @@ function analyzeFvpLogs(htmlString) {
 }
 
 // -------------------------------------------------------------
-// VALIDADOR E RENDERIZAÇÃO FINAL COM LIGHTBOX
+// VALIDADOR PF/PJ E RENDERIZAÇÃO FINAL (TEXTOS ORIGINAIS APLICADOS)
 // -------------------------------------------------------------
 function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) {
     const isPF = meta.alias.toLowerCase().includes('-pf') || fileName.toLowerCase().includes('pf') || meta.alias.toLowerCase().includes('personal');
@@ -268,19 +286,19 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
             let vazados = [];
             if(temBusiness) vazados.push("BusinessEntity");
             if(temCnpj) vazados.push("BrazilCNPJ");
-            validacaoHtml = `<div class="validation-box error">🔴 <strong>Erro Crítico (PF):</strong> O teste PF está a apresentar os campos: ${vazados.join(' e ')}.</div>`;
+            validacaoHtml = `<div class="validation-box error">🔴 O teste PF apresenta os campos: ${vazados.join(' e ')}.</div>`;
         } else {
-            validacaoHtml = `<div class="validation-box success">✅ <strong>Validação de Perfil (PF):</strong> Não apresenta BusinessEntity nem BrazilCNPJ.</div>`;
+            validacaoHtml = `<div class="validation-box success">✅ Não apresenta Presença do BusinessEntity e BrazilCNPJ.</div>`;
         }
     } else if (isPJ) {
         tipoTesteLabel = "Pessoa Jurídica (PJ)";
-        if (!temBusiness && !temCnpj) {
-            validacaoHtml = `<div class="validation-box error">🔴 <strong>Erro Crítico (PJ):</strong> Ausência de BusinessEntity e BrazilCNPJ (Se faltar, fica em vermelho).</div>`;
+        if (!temBusiness || !temCnpj) {
+            let faltantes = [];
+            if(!temBusiness) faltantes.push("BusinessEntity");
+            if(!temCnpj) faltantes.push("BrazilCNPJ");
+            validacaoHtml = `<div class="validation-box error">🔴 Falta o campo: ${faltantes.join(' e ')}.</div>`;
         } else {
-            let presentes = [];
-            if(temBusiness) presentes.push("BusinessEntity");
-            if(temCnpj) presentes.push("BrazilCNPJ");
-            validacaoHtml = `<div class="validation-box success">✅ <strong>Validação de Perfil (PJ):</strong> Campos presentes (${presentes.join(' e ')}).</div>`;
+            validacaoHtml = `<div class="validation-box success">✅ Campos presentes.</div>`;
         }
     }
 
@@ -300,6 +318,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
         ${validacaoHtml}
 
         <div class="metadata-grid">
+            <div class="metadata-item"><span>Dispositivo de Teste</span><strong>${meta.device}</strong></div>
             <div class="metadata-item"><span>Alias da Execução</span><strong>${meta.alias}</strong></div>
             <div class="metadata-item"><span>Auth. Server ID</span><strong>${meta.asId}</strong></div>
             <div class="metadata-item"><span>Instituição Transmissora</span><strong>${meta.institutionName}</strong></div>
@@ -336,7 +355,6 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
         
         let galeriaHtml = "";
         if (evidencias.imagens.length > 0) {
-            // ID único para a galeria deste arquivo
             const galleryId = 'gal_' + Math.random().toString(36).substr(2, 9);
             const apenasImagens = evidencias.imagens.filter(img => !img.isPdf);
             window.evidenceGalleries[galleryId] = apenasImagens;
