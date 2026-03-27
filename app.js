@@ -217,21 +217,27 @@ function extractMetadata(htmlString) {
         if (matchNested) cnpjDaInstituicao = matchNested[1].trim();
     }
 
-    // USER-AGENT (Dispositivo)
+    // USER-AGENT (Identificação visual por SVGs nativos)
     let userAgentMatch = htmlString.match(/<td class="more-key">user-agent<\/td>[\s\S]*?<pre[^>]*>([^<]+)<\/pre>/i);
     let userAgentRaw = userAgentMatch ? userAgentMatch[1].trim() : extractJson("user-agent");
     
-    let deviceLabel = "Não detetado";
+    // SVGs Inline para logos das marcas
+    const iconApple = `<svg width="18" height="18" viewBox="0 0 384 512" fill="currentColor" style="margin-right: 6px;"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>`;
+    const iconAndroid = `<svg width="18" height="18" viewBox="0 0 576 512" fill="currentColor" style="margin-right: 6px;"><path d="M420.22 135.78l34.46-59.69c3.08-5.35 1.25-12.19-4.11-15.28-5.36-3.09-12.2-1.26-15.28 4.1L400 126.85c-33.86-15.35-71.32-23.85-111.99-23.85-40.68 0-78.14 8.5-112 23.85l-35.29-61.94c-3.08-5.36-9.92-7.19-15.28-4.1-5.36 3.09-7.19 9.93-4.11 15.28l34.46 59.69C69.05 186.73 10.96 270.81 1.22 368h573.55c-9.74-97.19-67.83-181.27-154.55-232.22zM157.23 282.68c-14.13 0-25.59-11.46-25.59-25.59s11.46-25.59 25.59-25.59 25.59 11.46 25.59 25.59-11.46 25.59-25.59 25.59zm261.54 0c-14.13 0-25.59-11.46-25.59-25.59s11.46-25.59 25.59-25.59 25.59 11.46 25.59 25.59-11.46 25.59-25.59 25.59zM1.22 400h573.55v48C574.77 483.35 546.12 512 510.77 512H65.23c-35.35 0-64-28.65-64-64v-48z"/></svg>`;
+    const iconWindows = `<svg width="18" height="18" viewBox="0 0 448 512" fill="currentColor" style="margin-right: 6px;"><path d="M0 93.6l183.6-25.3v177.4H0V93.6zm0 324.6l183.6 25.3V268.4H0v149.8zm203.8 28L448 480V268.4H203.8v177.8zm0-380.6v180.1H448V32L203.8 65.6z"/></svg>`;
+    const iconApi = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`;
+    const iconOther = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+
+    let deviceLabel = `${iconOther} Outro`;
     if (userAgentRaw !== "Não encontrado") {
         let ua = userAgentRaw.toLowerCase();
-        if (ua.includes("android")) deviceLabel = "🤖 Android";
-        else if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ios") || ua.includes("darwin")) deviceLabel = "🍎 iOS";
-        else if (ua.includes("windows") || ua.includes("macintosh") || ua.includes("linux")) deviceLabel = "💻 Desktop";
-        else if (ua.includes("postman") || ua.includes("insomnia") || ua.includes("axios")) deviceLabel = "⚙️ API Client";
-        else deviceLabel = "🌐 Outro";
+        if (ua.includes("android")) deviceLabel = `${iconAndroid} Android`;
+        else if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ios") || ua.includes("darwin")) deviceLabel = `${iconApple} iOS`;
+        else if (ua.includes("windows") || ua.includes("macintosh") || ua.includes("linux")) deviceLabel = `${iconWindows} Desktop`;
+        else if (ua.includes("postman") || ua.includes("insomnia") || ua.includes("axios")) deviceLabel = `${iconApi} API Client`;
     }
 
-    // SANITIZAÇÃO (Bloqueia o CNPJ de credor conflitante)
+    // SANITIZAÇÃO
     let htmlSanitizado = htmlString
         .replace(/63602987000134/g, "")
         .replace(/creditorCpfCnpj/gi, "");
@@ -257,18 +263,18 @@ function analyzeFvpLogs(htmlString) {
         if (erroLimpo) resultados.push({ summary: erroLimpo });
     }
 
-    // Avaliação de Status Simplificada (Sucesso, Falha ou Interrompido)
+    // Avaliação do cenário geral do Teste
     if (isInterrupted && resultados.length === 0) {
         resultados.push({ isInterrupted: true, summary: "O módulo de teste foi INTERROMPIDO fatalmente pelo FVP. (Ex: Timeout de requisição ou falha 500 no ambiente)" });
     } else if (resultados.length === 0) {
-        resultados.push({ sucesso: true, summary: "Execução limpa. Nenhum erro localizado no log." });
+        resultados.push({ sucesso: true, summary: "" });
     }
     
     return { metadata, resultados };
 }
 
 // -------------------------------------------------------------
-// VALIDADOR PF/PJ E RENDERIZAÇÃO FINAL (TEXTOS ORIGINAIS APLICADOS)
+// VALIDADOR PF/PJ E RENDERIZAÇÃO FINAL
 // -------------------------------------------------------------
 function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) {
     const isPF = meta.alias.toLowerCase().includes('-pf') || fileName.toLowerCase().includes('pf') || meta.alias.toLowerCase().includes('personal');
@@ -302,12 +308,16 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
         }
     }
 
+    // Define a classe da borda baseada no sucesso da execução (Feedback Visual Macro)
+    const testPassed = resultados[0].sucesso === true;
+    const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
+
     let html = `
-    <div class="file-report">
+    <div class="file-report ${borderStatusClass}">
         <h3 class="file-header" style="justify-content: space-between;">
             <div style="display:flex; align-items:center;">
                 📄 ${fileName} 
-                <span class="badge" style="margin-left: 12px; background: #333; font-size: 0.65rem;">Modo: ${tipoTesteLabel}</span>
+                <span class="badge" style="margin-left: 12px; font-size: 0.65rem;">Modo: ${tipoTesteLabel}</span>
             </div>
             <a href="${htmlBlobUrl}" target="_blank" class="btn-view-log">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
@@ -318,7 +328,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
         ${validacaoHtml}
 
         <div class="metadata-grid">
-            <div class="metadata-item"><span>Dispositivo de Teste</span><strong>${meta.device}</strong></div>
+            <div class="metadata-item"><span>Dispositivo</span><strong>${meta.device}</strong></div>
             <div class="metadata-item"><span>Alias da Execução</span><strong>${meta.alias}</strong></div>
             <div class="metadata-item"><span>Auth. Server ID</span><strong>${meta.asId}</strong></div>
             <div class="metadata-item"><span>Instituição Transmissora</span><strong>${meta.institutionName}</strong></div>
@@ -326,29 +336,9 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
         </div>
     `;
 
-    resultados.forEach(r => {
-        if (r.sucesso) {
-            html += `
-            <div class="card sucesso">
-                <h3 class="card-title">✓ Status da Execução: Sucesso</h3>
-                <p style="margin:0; color: var(--text-base);">${r.summary}</p>
-            </div>`;
-        } else if (r.isInterrupted) {
-            html += `
-            <div class="card interrompido">
-                <h3 class="card-title">⚠ Status da Execução: Interrompido</h3>
-                <div class="card-content" style="margin-top: 10px;">${r.summary}</div>
-            </div>`;
-        } else {
-            html += `
-            <div class="card falha">
-                <h3 class="card-title">✕ Status da Execução: Falhou</h3>
-                <div class="card-content" style="margin-top: 10px;">${r.summary}</div>
-            </div>`;
-        }
-    });
+    // Renderização dos cards de erro removida a pedido do cliente.
 
-    if (!resultados[0].sucesso || evidencias.mostrarPainel) {
+    if (!testPassed || evidencias.mostrarPainel) {
         const c = evidencias.checklist;
         const tudoOk = c.saldo && c.versaoApp && c.erro;
         const cssClass = tudoOk ? "ok" : "nok";
@@ -359,23 +349,23 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
             const apenasImagens = evidencias.imagens.filter(img => !img.isPdf);
             window.evidenceGalleries[galleryId] = apenasImagens;
 
-            galeriaHtml = `<div class="evidence-gallery" style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">`;
+            galeriaHtml = `<div class="evidence-gallery">`;
             
             evidencias.imagens.forEach(img => {
                 if (img.isPdf) {
                     galeriaHtml += `
-                    <div class="evidence-item" style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 90px;">
+                    <div class="evidence-item">
                         <a href="${img.url}" target="_blank" style="display:flex; align-items:center; justify-content:center; width:90px; height:90px; background:#29292E; border-radius:6px; text-decoration:none; border: 1px solid var(--border-color); transition: 0.2s;" onmouseover="this.style.borderColor='#8257E5'" onmouseout="this.style.borderColor='var(--border-color)'">
                             <span style="font-size: 1.8rem;">📄</span>
                         </a>
-                        <span class="evidence-name" style="font-size: 0.65rem; color: var(--text-muted); text-align: center; word-break: break-all; line-height: 1.2;">${img.nome}</span>
+                        <span class="evidence-name">${img.nome}</span>
                     </div>`;
                 } else {
                     const imgIndex = apenasImagens.findIndex(i => i.url === img.url);
                     galeriaHtml += `
-                    <div class="evidence-item" style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 90px; cursor: pointer;" onclick="openLightbox('${galleryId}', ${imgIndex})">
-                        <img src="${img.url}" class="evidence-thumb" alt="${img.nome}" title="Clique para ampliar" style="width: 90px; height: 90px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-color);" />
-                        <span class="evidence-name" style="font-size: 0.65rem; color: var(--text-muted); text-align: center; word-break: break-all; line-height: 1.2;">${img.nome}</span>
+                    <div class="evidence-item" onclick="openLightbox('${galleryId}', ${imgIndex})">
+                        <img src="${img.url}" class="evidence-thumb" alt="${img.nome}" title="Clique para ampliar" />
+                        <span class="evidence-name">${img.nome}</span>
                     </div>`;
                 }
             });
