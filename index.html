@@ -58,6 +58,18 @@
             </section>
 
             <section class="results-section">
+                <div class="results-header" id="resultsHeader" style="display: none;">
+                    <div class="scoreboard">
+                        <button class="filter-btn active" data-filter="all">Total: <strong id="countAll">0</strong></button>
+                        <button class="filter-btn success" data-filter="passed">✅ Sucessos: <strong id="countPassed">0</strong></button>
+                        <button class="filter-btn danger" data-filter="failed">❌ Falhas: <strong id="countFailed">0</strong></button>
+                    </div>
+                    <button id="clearBtn" class="btn-outline danger-outline">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        Limpar Mesa
+                    </button>
+                </div>
+
                 <div id="resultsContainer">
                     <div class="empty-state">
                         <p>Nenhum log processado ainda. Aguardando envio...</p>

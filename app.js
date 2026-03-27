@@ -33,6 +33,62 @@ if(logoutBtn) {
 }
 
 // -------------------------------------------------------------
+// ESTADO GLOBAL & DASHBOARD INTERATIVO
+// -------------------------------------------------------------
+let dashboardStats = { all: 0, passed: 0, failed: 0 };
+let currentFilter = 'all';
+
+const resultsHeader = document.getElementById('resultsHeader');
+const countAll = document.getElementById('countAll');
+const countPassed = document.getElementById('countPassed');
+const countFailed = document.getElementById('countFailed');
+const clearBtn = document.getElementById('clearBtn');
+const filterBtns = document.querySelectorAll('.filter-btn');
+
+function updateScoreboard() {
+    if (dashboardStats.all > 0) {
+        resultsHeader.style.display = 'flex';
+    } else {
+        resultsHeader.style.display = 'none';
+    }
+    
+    countAll.textContent = dashboardStats.all;
+    countPassed.textContent = dashboardStats.passed;
+    countFailed.textContent = dashboardStats.failed;
+    
+    applyFilter();
+}
+
+filterBtns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        const target = e.currentTarget;
+        target.classList.add('active');
+        currentFilter = target.getAttribute('data-filter');
+        applyFilter();
+    });
+});
+
+function applyFilter() {
+    const reports = document.querySelectorAll('.file-report');
+    reports.forEach(report => {
+        const status = report.getAttribute('data-status');
+        if (currentFilter === 'all' || currentFilter === status) {
+            report.classList.remove('hidden');
+        } else {
+            report.classList.add('hidden');
+        }
+    });
+}
+
+clearBtn.addEventListener('click', () => {
+    document.getElementById('resultsContainer').innerHTML = `<div class="empty-state"><p>Nenhum log processado ainda. Aguardando envio...</p></div>`;
+    dashboardStats = { all: 0, passed: 0, failed: 0 };
+    updateScoreboard();
+    window.evidenceGalleries = {}; 
+});
+
+// -------------------------------------------------------------
 // INJETANDO O MODAL NO DOM DINAMICAMENTE (LIGHTBOX)
 // -------------------------------------------------------------
 const modalHTML = `
@@ -71,7 +127,6 @@ function updateLightbox() {
     lightboxCaption.textContent = `${img.nome} (${currentImageIndex + 1} de ${gallery.length})`;
 }
 
-// Controles do Lightbox
 lightboxClose.addEventListener('click', () => lightboxModal.classList.remove('active'));
 lightboxModal.addEventListener('click', (e) => { if(e.target === lightboxModal) lightboxModal.classList.remove('active'); });
 
@@ -88,7 +143,6 @@ lightboxNext.addEventListener('click', (e) => {
     updateLightbox();
 });
 
-// Suporte a Teclado
 document.addEventListener('keydown', (e) => {
     if (!lightboxModal.classList.contains('active')) return;
     if (e.key === 'Escape') lightboxModal.classList.remove('active');
@@ -117,7 +171,15 @@ fileInput.addEventListener('change', function() { if(this.files && this.files.le
 
 async function processFiles(files) {
     const container = document.getElementById("resultsContainer");
-    container.innerHTML = `<div class="empty-state"><p>Processando ${files.length} arquivo(s)... ⚡</p></div>`;
+    
+    // Remove empty state se existir
+    const emptyState = container.querySelector('.empty-state');
+    if (emptyState) emptyState.remove();
+
+    // Feedback de carregamento temporário
+    const loadingId = 'loading-' + Date.now();
+    container.insertAdjacentHTML('afterbegin', `<div id="${loadingId}" style="text-align:center; padding: 20px; color: var(--color-primary); font-weight: 500;">Processando ${files.length} arquivo(s)... ⚡</div>`);
+
     let htmlFinal = "";
 
     for (let i = 0; i < files.length; i++) {
@@ -138,14 +200,24 @@ async function processFiles(files) {
             const { metadata, resultados } = analyzeFvpLogs(htmlContent);
             const evidencias = await checkNokEvidences(zip, fileNames);
             
-            htmlFinal += generateFileBlock(file.name, metadata, resultados, evidencias, htmlBlobUrl);
+            // Atualiza Dashboard Global
+            const testPassed = resultados[0].sucesso === true;
+            dashboardStats.all++;
+            if (testPassed) dashboardStats.passed++;
+            else dashboardStats.failed++;
+
+            htmlFinal += generateFileBlock(file.name, metadata, resultados, evidencias, htmlBlobUrl, testPassed);
 
         } catch (error) {
             console.error(`Erro no arquivo ${file.name}:`, error);
         }
     }
     
-    container.innerHTML = htmlFinal || `<div class="empty-state"><p>Nenhum log válido encontrado.</p></div>`;
+    // Remove o aviso de carregamento e insere os novos resultados (Acumulativo)
+    document.getElementById(loadingId)?.remove();
+    container.insertAdjacentHTML('afterbegin', htmlFinal);
+    
+    updateScoreboard();
 }
 
 // -------------------------------------------------------------
@@ -217,11 +289,9 @@ function extractMetadata(htmlString) {
         if (matchNested) cnpjDaInstituicao = matchNested[1].trim();
     }
 
-    // USER-AGENT (Identificação visual por SVGs nativos)
     let userAgentMatch = htmlString.match(/<td class="more-key">user-agent<\/td>[\s\S]*?<pre[^>]*>([^<]+)<\/pre>/i);
     let userAgentRaw = userAgentMatch ? userAgentMatch[1].trim() : extractJson("user-agent");
     
-    // SVGs Inline para logos das marcas
     const iconApple = `<svg width="18" height="18" viewBox="0 0 384 512" fill="currentColor" style="margin-right: 6px;"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>`;
     const iconAndroid = `<svg width="18" height="18" viewBox="0 0 576 512" fill="currentColor" style="margin-right: 6px;"><path d="M420.22 135.78l34.46-59.69c3.08-5.35 1.25-12.19-4.11-15.28-5.36-3.09-12.2-1.26-15.28 4.1L400 126.85c-33.86-15.35-71.32-23.85-111.99-23.85-40.68 0-78.14 8.5-112 23.85l-35.29-61.94c-3.08-5.36-9.92-7.19-15.28-4.1-5.36 3.09-7.19 9.93-4.11 15.28l34.46 59.69C69.05 186.73 10.96 270.81 1.22 368h573.55c-9.74-97.19-67.83-181.27-154.55-232.22zM157.23 282.68c-14.13 0-25.59-11.46-25.59-25.59s11.46-25.59 25.59-25.59 25.59 11.46 25.59 25.59-11.46 25.59-25.59 25.59zm261.54 0c-14.13 0-25.59-11.46-25.59-25.59s11.46-25.59 25.59-25.59 25.59 11.46 25.59 25.59-11.46 25.59-25.59 25.59zM1.22 400h573.55v48C574.77 483.35 546.12 512 510.77 512H65.23c-35.35 0-64-28.65-64-64v-48z"/></svg>`;
     const iconWindows = `<svg width="18" height="18" viewBox="0 0 448 512" fill="currentColor" style="margin-right: 6px;"><path d="M0 93.6l183.6-25.3v177.4H0V93.6zm0 324.6l183.6 25.3V268.4H0v149.8zm203.8 28L448 480V268.4H203.8v177.8zm0-380.6v180.1H448V32L203.8 65.6z"/></svg>`;
@@ -237,7 +307,6 @@ function extractMetadata(htmlString) {
         else if (ua.includes("postman") || ua.includes("insomnia") || ua.includes("axios")) deviceLabel = `${iconApi} API Client`;
     }
 
-    // SANITIZAÇÃO
     let htmlSanitizado = htmlString
         .replace(/63602987000134/g, "")
         .replace(/creditorCpfCnpj/gi, "");
@@ -263,7 +332,6 @@ function analyzeFvpLogs(htmlString) {
         if (erroLimpo) resultados.push({ summary: erroLimpo });
     }
 
-    // Avaliação do cenário geral do Teste
     if (isInterrupted && resultados.length === 0) {
         resultados.push({ isInterrupted: true, summary: "O módulo de teste foi INTERROMPIDO fatalmente pelo FVP. (Ex: Timeout de requisição ou falha 500 no ambiente)" });
     } else if (resultados.length === 0) {
@@ -276,7 +344,7 @@ function analyzeFvpLogs(htmlString) {
 // -------------------------------------------------------------
 // VALIDADOR PF/PJ E RENDERIZAÇÃO FINAL
 // -------------------------------------------------------------
-function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) {
+function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, testPassed) {
     const isPF = meta.alias.toLowerCase().includes('-pf') || fileName.toLowerCase().includes('pf') || meta.alias.toLowerCase().includes('personal');
     const isPJ = meta.alias.toLowerCase().includes('-pj') || fileName.toLowerCase().includes('pj') || meta.alias.toLowerCase().includes('business');
     
@@ -308,12 +376,11 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
         }
     }
 
-    // Define a classe da borda baseada no sucesso da execução (Feedback Visual Macro)
-    const testPassed = resultados[0].sucesso === true;
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
+    const dataStatus = testPassed ? 'passed' : 'failed';
 
     let html = `
-    <div class="file-report ${borderStatusClass}">
+    <div class="file-report ${borderStatusClass}" data-status="${dataStatus}">
         <h3 class="file-header" style="justify-content: space-between;">
             <div style="display:flex; align-items:center;">
                 📄 ${fileName} 
@@ -335,8 +402,6 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl) 
             ${meta.cnpj && meta.cnpj !== "Não encontrado" ? `<div class="metadata-item"><span>CNPJ do Ambiente</span><strong>${meta.cnpj}</strong></div>` : ""}
         </div>
     `;
-
-    // Renderização dos cards de erro removida a pedido do cliente.
 
     if (!testPassed || evidencias.mostrarPainel) {
         const c = evidencias.checklist;
