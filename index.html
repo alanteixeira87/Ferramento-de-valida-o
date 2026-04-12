@@ -14,9 +14,9 @@
 
     <div id="loginScreen" class="login-wrapper">
         <div class="login-box">
-            <div class="topbar-brand justify-center mb-4">
-                <span class="logo-icon">⚡</span>
-                <h1>QA Analytics</h1>
+            <div class="topbar-brand justify-center mb-4" style="text-align: center;">
+                <span class="logo-icon" style="font-size: 2rem;">⚡</span>
+                <h1 style="color: var(--text-title); margin-top: 8px;">QA Analytics</h1>
             </div>
             <p class="login-subtitle">Acesso restrito ao time de Qualidade.</p>
             
@@ -26,56 +26,104 @@
                     <input type="password" id="passwordInput" placeholder="Digite a senha..." required>
                 </div>
                 <button type="submit" class="btn-primary w-full">Entrar no Dashboard</button>
-                <p id="loginError" class="login-error" style="display: none;">Senha incorreta. Tente novamente.</p>
+                <p id="loginError" style="color: var(--status-danger); display:none; margin-top: 10px; font-size: 0.85rem; text-align: center;">Senha incorreta. Tente novamente.</p>
             </form>
         </div>
     </div>
 
-    <div id="mainApp" style="display: none;">
-        <header class="topbar">
-            <div class="topbar-brand">
-                <span class="logo-icon">⚡</span>
-                <h1>QA Analytics <span class="badge">SIGC</span></h1>
+    <div id="mainApp" class="dashboard-layout" style="display: none;">
+        
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span class="logo-icon" style="font-size: 1.4rem;">⚡</span>
+                <h2>QA Analytics</h2>
             </div>
-            <button id="logoutBtn" class="btn-outline">Sair</button>
-        </header>
+            <nav class="sidebar-nav">
+                <button id="btnNavTests" class="nav-btn active">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    Realizar Testes
+                </button>
+                <button id="btnNavDocs" class="nav-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+                    Documentação
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="logoutBtn" class="btn-outline w-full">Sair do Sistema</button>
+            </div>
+        </aside>
 
-        <main class="container">
-            <section class="upload-section">
-                <div id="dropZone" class="drop-zone">
-                    <div class="drop-content">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary); margin-bottom: 16px;">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="17 8 12 3 7 8"></polyline>
-                            <line x1="12" y1="3" x2="12" y2="15"></line>
-                        </svg>
-                        <h2>Arraste e solte os arquivos .zip</h2>
-                        <p>Ou clique para procurar em sua máquina</p>
-                        <input type="file" id="fileInput" accept=".zip" multiple>
-                        <button id="uploadBtn" class="btn-primary">Selecionar Arquivos</button>
+        <main class="main-content">
+            
+            <div id="viewTests" class="view-section active">
+                <header class="topbar">
+                    <h2>Auditoria de Logs FVP</h2>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Importe os arquivos ZIP exportados para validação automática.</p>
+                </header>
+
+                <section class="upload-section">
+                    <div class="drop-zone" id="dropZone">
+                        <div class="drop-zone-content">
+                            <span style="font-size: 2.5rem; margin-bottom: 12px; display: block;">📂</span>
+                            <h3 style="color: var(--text-title);">Arraste os arquivos .zip para cá</h3>
+                            <p>ou clique para selecionar do seu computador</p>
+                            <input type="file" id="fileInput" accept=".zip" multiple style="display: none;">
+                            <button id="uploadBtn" class="btn-primary" style="margin-top: 16px;">Selecionar Arquivos</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="results-section">
+                    <div class="results-header" id="resultsHeader" style="display: none;">
+                        <div class="scoreboard">
+                            <button class="filter-btn active" data-filter="all">Total: <strong id="countAll">0</strong></button>
+                            <button class="filter-btn success" data-filter="passed"><span style="color: var(--status-success);">●</span> Sucessos: <strong id="countPassed">0</strong></button>
+                            <button class="filter-btn danger" data-filter="failed"><span style="color: var(--status-danger);">●</span> Falhas: <strong id="countFailed">0</strong></button>
+                        </div>
+                        <button id="clearBtn" class="btn-outline danger-outline">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            Limpar Mesa
+                        </button>
+                    </div>
+
+                    <div id="resultsContainer">
+                        <div class="empty-state">
+                            <p>Nenhum log processado ainda. Aguardando envio...</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <div id="viewDocs" class="view-section">
+                <header class="topbar">
+                    <h2>📖 Base de Conhecimento e Documentação</h2>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Entenda as regras de negócio e validações da ferramenta.</p>
+                </header>
+
+                <div class="docs-content">
+                    <div class="docs-card">
+                        <h3>1. Como o Motor de Busca Funciona?</h3>
+                        <p>O QA Analytics realiza a varredura dos logs extraídos do <strong>FVP</strong>. A principal missão é evitar Falsos Positivos causados por estruturas de Conglomerados.</p>
+                        <p>O motor cruza o <strong>CustomerFriendlyName</strong> contido no log com a tabela oficial de <strong>AS-IDs</strong>. Isso garante que a ferramenta não aponte erroneamente para a "Marca Matriz" (Ex: XP) caso o teste seja destinado a uma "Marca Filha" (Ex: Azimut).</p>
+                    </div>
+
+                    <div class="docs-card">
+                        <h3>2. Validação Estrutural (PF vs PJ)</h3>
+                        <p>O sistema valida a presença de dados confidenciais com base na extensão do nome do arquivo ou do alias de execução:</p>
+                        <ul>
+                            <li><strong>Pessoa Física (PF):</strong> O arquivo <strong style="color: var(--status-danger);">REPROVA</strong> se houver vazamento das tags <code>BusinessEntity</code> ou <code>BrazilCNPJ</code> no corpo do log.</li>
+                            <li><strong>Pessoa Jurídica (PJ):</strong> O arquivo <strong style="color: var(--status-danger);">REPROVA</strong> se esses mesmos campos estiverem ausentes.</li>
+                        </ul>
+                    </div>
+
+                    <div class="docs-card highlight-card">
+                        <h3 style="color: var(--status-warning);">⚠️ Exceção de Regra de Negócio: Teste Custom Data Unique</h3>
+                        <p>Para o plano de testes <strong><code>customer_data_unique</code></strong>, é nativo que o termo <code>brazilCnpj</code> apareça no corpo de descrição do teste executado pelo FVP, independentemente de ser um cenário PF ou PJ.</p>
+                        <p><strong>Ação da Ferramenta:</strong> Para evitar reprovações incorretas de vazamento de dados, o QA Analytics possui uma trava de segurança. Se o nome do arquivo contiver "customer_data_unique", o sistema <strong>ignorará o BrazilCNPJ em testes PF</strong> e aprovará o arquivo, adicionando um alerta de auditoria em tela informando que a exceção foi aplicada com sucesso.</p>
                     </div>
                 </div>
-            </section>
+            </div>
 
-            <section class="results-section">
-                <div class="results-header" id="resultsHeader" style="display: none;">
-                    <div class="scoreboard">
-                        <button class="filter-btn active" data-filter="all">Total: <strong id="countAll">0</strong></button>
-                        <button class="filter-btn success" data-filter="passed">✅ Sucessos: <strong id="countPassed">0</strong></button>
-                        <button class="filter-btn danger" data-filter="failed">❌ Falhas: <strong id="countFailed">0</strong></button>
-                    </div>
-                    <button id="clearBtn" class="btn-outline danger-outline">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                        Limpar Mesa
-                    </button>
-                </div>
-
-                <div id="resultsContainer">
-                    <div class="empty-state">
-                        <p>Nenhum log processado ainda. Aguardando envio...</p>
-                    </div>
-                </div>
-            </section>
         </main>
     </div>
 
