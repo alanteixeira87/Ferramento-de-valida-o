@@ -460,7 +460,7 @@ async function processFiles(files) {
             htmlFinal += `
             <div class="file-report report-failed">
                 <h3 class="file-header">❌ Falha ao processar o arquivo: ${file.name}</h3>
-                <p style="padding: 10px; color: var(--status-danger); font-size: 0.9rem;">
+                <p style="padding: 10px; color: var(--status-warning); font-size: 0.9rem;">
                     Erro técnico na extração do log. <br>
                     <strong>Detalhe:</strong> ${error.message}
                 </p>
@@ -522,14 +522,104 @@ async function checkNokEvidences(zip, filePaths) {
 // -------------------------------------------------------------
 // EXTRATOR DE METADADOS
 // -------------------------------------------------------------
+function decodeHtmlEntities(value) {
+    return value
+        .replace(/&quot;/gi, '"')
+        .replace(/&amp;/gi, '&')
+        .replace(/&#39;|&apos;/gi, "'");
+}
+
+function hasMeaningfulBrazilCnpj(htmlString) {
+    const ignoredPattern = /AddProductTypeToPhase2Config[\s\S]{0,160}?brazilCnpj is empty,\s*setting product type to Personal/i;
+    const cleanedHtml = htmlString.replace(ignoredPattern, '');
+    return /brazilCNPJ/i.test(cleanedHtml);
+}
+
+function hasMeaningfulBusinessEntity(htmlString) {
+    return /(?:"|&quot;)businessEntity(?:"|&quot;)\s*:\s*\{/i.test(htmlString);
+}
+
+function extractAuthServerCandidates(htmlString) {
+    const decodedHtml = decodeHtmlEntities(htmlString);
+    const authServerRegex = /"CustomerFriendlyName"\s*:\s*"([^"]+)"[\s\S]{0,1200}?"Issuer"\s*:\s*"([^"]+)"[\s\S]{0,600}?"OpenIDDiscoveryDocument"\s*:\s*"([^"]+)"[\s\S]{0,600}?"AuthorisationServerId"\s*:\s*"([0-9a-f-]{36})"/gi;
+    const candidates = [];
+    let match;
+
+    while ((match = authServerRegex.exec(decodedHtml)) !== null) {
+        const [, name, issuer, discoveryUrl, asId] = match;
+        candidates.push({
+            name: name.trim(),
+            issuer: issuer.trim(),
+            discoveryUrl: discoveryUrl.trim(),
+            asId: asId.trim().toLowerCase()
+        });
+    }
+
+    return candidates;
+}
+
+function inferAuthServerFromLog(htmlString) {
+    const decodedHtml = decodeHtmlEntities(htmlString);
+    const candidates = extractAuthServerCandidates(decodedHtml);
+
+    if (candidates.length === 0) return null;
+
+    const observedUrls = decodedHtml.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+    const uniqueUrls = [...new Set(observedUrls)];
+
+    const scoreCandidate = (candidate) => {
+        let score = 0;
+        const issuer = candidate.issuer.replace(/\/+$/, '');
+        const discoveryUrl = candidate.discoveryUrl.replace(/\/+$/, '');
+
+        uniqueUrls.forEach(url => {
+            const normalizedUrl = url.replace(/\/+$/, '');
+
+            if (normalizedUrl === issuer) score += 12;
+            if (normalizedUrl === discoveryUrl) score += 12;
+            if (normalizedUrl.startsWith(`${issuer}/`)) score += 8;
+            if (normalizedUrl.startsWith(`${discoveryUrl}/`)) score += 8;
+        });
+
+        try {
+            const issuerUrl = new URL(issuer);
+            const pathSegments = issuerUrl.pathname.split('/').filter(Boolean);
+            const slug = pathSegments[0] === 'orgs' ? pathSegments[1] : pathSegments[0];
+
+            if (slug) {
+                uniqueUrls.forEach(url => {
+                    try {
+                        const currentUrl = new URL(url);
+                        const currentPath = currentUrl.pathname;
+                        const sameDomainFamily = currentUrl.hostname.endsWith('.xpi.com.br') && issuerUrl.hostname.endsWith('.xpi.com.br');
+
+                        if (sameDomainFamily && (currentPath === `/${slug}` || currentPath.startsWith(`/${slug}/`))) {
+                            score += 4;
+                        }
+                    } catch (_) {}
+                });
+            }
+        } catch (_) {}
+
+        return score;
+    };
+
+    const rankedCandidates = candidates
+        .map(candidate => ({ ...candidate, score: scoreCandidate(candidate) }))
+        .sort((a, b) => b.score - a.score);
+
+    return rankedCandidates[0] && rankedCandidates[0].score > 0 ? rankedCandidates[0] : null;
+}
+
 function extractMetadata(htmlString) {
+    const authServerInferido = inferAuthServerFromLog(htmlString);
     const extractJson = (key) => {
         const regex = new RegExp(`(?:\"|&quot;)${key}(?:\"|&quot;)\\s*:\\s*(?:\"|&quot;)([^\"&]+)(?:\"|&quot;)`, 'i');
         const match = htmlString.match(regex);
         return match ? match[1].trim() : "Não encontrado";
     };
 
-    let asId = extractJson("AuthorisationServerId");
+    let asId = authServerInferido?.asId || extractJson("AuthorisationServerId");
     if (asId === "Não encontrado") asId = extractJson("authorisationServerId");
     if (asId === "Não encontrado") asId = extractJson("as_id");
     if (asId === "Não encontrado") asId = extractJson("as-id");
@@ -542,20 +632,20 @@ function extractMetadata(htmlString) {
     }
 
     let aliasMatch = htmlString.match(/(?:<td[^>]*>alias<\/td>|<th[^>]*>alias<\/th>)[\s\S]{0,1000}?<pre[^>]*>([^<]+)<\/pre>/i);
-    let alias = aliasMatch ? aliasMatch[1].trim() : extractJson("alias");
+    let alias = aliasMatch ? decodeHtmlEntities(aliasMatch[1].trim()) : extractJson("alias");
     
-    let institutionName = extractJson("CustomerFriendlyName");
+    let institutionName = authServerInferido?.name || extractJson("CustomerFriendlyName");
     if (institutionName === "Não encontrado") institutionName = extractJson("OrganisationName");
 
     let cnpjDaInstituicao = extractJson("brazilCNPJ");
     if (cnpjDaInstituicao === "Não encontrado") {
         const regexNested = /(?:"|&quot;)businessEntity(?:"|&quot;)\s*:\s*\{[\s\S]{0,300}?(?:"|&quot;)identification(?:"|&quot;)\s*:\s*(?:"|&quot;)([^"&]+)(?:"|&quot;)/i;
         const matchNested = htmlString.match(regexNested);
-        if (matchNested) cnpjDaInstituicao = matchNested[1].trim();
+        if (matchNested) cnpjDaInstituicao = decodeHtmlEntities(matchNested[1].trim());
     }
 
     let userAgentMatch = htmlString.match(/<td class="more-key">user-agent<\/td>[\s\S]{0,250}?<pre[^>]*>([^<]+)<\/pre>/i);
-    let userAgentRaw = userAgentMatch ? userAgentMatch[1].trim() : extractJson("user-agent");
+    let userAgentRaw = userAgentMatch ? decodeHtmlEntities(userAgentMatch[1].trim()) : extractJson("user-agent");
     
     let deviceLabel = `Outro`;
     if (userAgentRaw !== "Não encontrado") {
@@ -566,12 +656,15 @@ function extractMetadata(htmlString) {
         else if (ua.includes("postman") || ua.includes("insomnia") || ua.includes("axios")) deviceLabel = `API Client`;
     }
 
-    const temBusinessEntity = /businessEntity/i.test(htmlString);
-    const temBrazilCnpj = /brazilCNPJ/i.test(htmlString);
+    const temBusinessEntity = hasMeaningfulBusinessEntity(htmlString);
+    const temBrazilCnpj = hasMeaningfulBrazilCnpj(htmlString);
 
     return { 
         alias, asId, cnpj: cnpjDaInstituicao, institutionName, 
-        temBusinessEntity, temBrazilCnpj, device: deviceLabel 
+        temBusinessEntity, temBrazilCnpj, device: deviceLabel,
+        authServerResolution: authServerInferido ? 'endpoint-match' : 'first-match',
+        authServerIssuer: authServerInferido?.issuer || "NÃ£o encontrado",
+        authServerDiscoveryUrl: authServerInferido?.discoveryUrl || "NÃ£o encontrado"
     };
 }
 
@@ -604,17 +697,22 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     
     let validacaoHtml = "";
     let validacaoInstHtml = "";
+    const hasDetectedCnpj = !!(meta.cnpj && meta.cnpj !== "Não encontrado");
+    const resolutionHintHtml = meta.authServerResolution === 'endpoint-match'
+        ? `<div class="resolution-hint">Marca resolvida pelo endpoint exercitado no teste: <strong>${meta.authServerIssuer}</strong></div>`
+        : "";
 
     // Ícones SVG Vetorizados
     const iconSuccess = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
     const iconError = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+    const iconWarning = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-warning)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>`;
 
     const safeAlias = meta.alias && meta.alias !== "Não encontrado" ? meta.alias.toLowerCase() : "";
     const safeFileName = fileName ? fileName.toLowerCase() : "";
 
     const isPF = safeAlias.includes('-pf') || safeFileName.includes('pf') || safeAlias.includes('personal');
     const isPJ = safeAlias.includes('-pj') || safeFileName.includes('pj') || safeAlias.includes('business');
-    let tipoTesteLabel = "Não Identificado (Validar Manualmente)";
+    let tipoTesteLabel = "Não Identificado";
 
     const temBusiness = meta.temBusinessEntity;
     const temCnpj = meta.temBrazilCnpj;
@@ -626,8 +724,8 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         tipoTesteLabel = "Pessoa Física (PF)";
         let vazados = [];
         
-        if (temBusiness) vazados.push("BusinessEntity");
-        if (temCnpj && !isCustomDataUnique) vazados.push("BrazilCNPJ");
+        if (hasDetectedCnpj && temBusiness) vazados.push("BusinessEntity");
+        if (hasDetectedCnpj && temCnpj && !isCustomDataUnique) vazados.push("BrazilCNPJ");
         
         if (vazados.length > 0) {
             validacaoHtml = `
@@ -641,7 +739,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             validacaoHtml = `
             <div class="validation-box success">
                 ${iconSuccess}
-                <div><strong>Estrutura PF Correta:</strong> Arquivo limpo de BusinessEntity indevido.${avisoExtra}</div>
+                <div><strong>Segmento PF:</strong> Estrutura compatível com pessoa física.${avisoExtra}</div>
             </div>`;
         }
     } else if (isPJ) {
@@ -666,60 +764,56 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         }
     }
 
-    // 2. Inteligência Resolutora de Conflitos
+    // 2. Validação por AS-ID (Fonte Primária) - Sem sobrescrever pelo nome
+    // O AS-ID do log é a fonte oficial de validação, não o nome/alias
     let transmissoraEncontrada = null;
     const logAsId = meta.asId;
     const logNome = meta.institutionName;
     
-    const normalize = str => str.toLowerCase().replace(/[^a-z0-9]/gi, '');
-    const logNomeNorm = logNome !== "Não encontrado" ? normalize(logNome) : "";
-
-    let marcaPeloId = dbAsId[logAsId] ? { ...dbAsId[logAsId], id: logAsId } : null;
-    let marcaPeloNome = null;
-
-    if (logNomeNorm) {
-        for (const key in dbAsId) {
-            if (normalize(dbAsId[key].nome) === logNomeNorm) {
-                marcaPeloNome = { ...dbAsId[key], id: key };
-                break;
-            }
-        }
-        if (!marcaPeloNome && !marcaPeloId) {
-            for (const key in dbAsId) {
-                if (logNomeNorm.includes(normalize(dbAsId[key].nome))) {
-                    marcaPeloNome = { ...dbAsId[key], id: key };
-                    break;
-                }
-            }
-        }
-    }
-
-    if (marcaPeloNome && marcaPeloId && marcaPeloNome.id !== marcaPeloId.id) {
-        transmissoraEncontrada = marcaPeloNome;
-    } else {
-        transmissoraEncontrada = marcaPeloNome || marcaPeloId;
-    }
+    // Busca pelo AS-ID exato que está no log (fonte primária)
+    transmissoraEncontrada = dbAsId[logAsId] ? { ...dbAsId[logAsId], id: logAsId } : null;
 
     if (transmissoraEncontrada) {
-        validacaoInstHtml = `
-        <div class="validation-box success">
-            ${iconSuccess}
-            <div><strong>Marca Transmissora Validada:</strong> O log pertence de fato à marca <b>${transmissoraEncontrada.nome}</b>.</div>
-        </div>`;
+        // O AS-ID foi encontrado na base - validar se o nome no log corresponde
+        const normalize = str => str.toLowerCase().replace(/[^a-z0-9]/gi, '');
+        const nomeNoLogNorm = logNome !== "Não encontrado" ? normalize(logNome) : "";
+        const nomeValidoNorm = normalize(transmissoraEncontrada.nome);
+        
+        // Verifica se o nome no log corresponde ao AS-ID (validação de consistência)
+        const nomesCorrespondem = nomeNoLogNorm && (
+            nomeNoLogNorm.includes(nomeValidoNorm) || 
+            nomeValidoNorm.includes(nomeNoLogNorm)
+        );
+        
+        if (nomesCorrespondem) {
+            validacaoInstHtml = `
+            <div class="validation-box success">
+                ${iconSuccess}
+                <div><strong>AS-ID Validado:</strong> O log pertence à marca <b>${transmissoraEncontrada.nome}</b> (AS-ID: ${logAsId})<br><span class="validation-detail">Endpoint base usado na identificação: ${meta.authServerIssuer}</span></div>
+            </div>`;
+        } else {
+            // Nome no log não corresponde ao AS-ID - alerta mas mantém o AS-ID como válido
+            validacaoInstHtml = `
+            <div class="validation-box success">
+                ${iconSuccess}
+                <div><strong>AS-ID Validado:</strong> O log pertence à marca <b>${transmissoraEncontrada.nome}</b> (AS-ID: ${logAsId})<br><span class="validation-detail">Endpoint base usado na identificação: ${meta.authServerIssuer}</span><br><span style="color: var(--status-warning); font-size: 0.85rem;">⚠️ Nota: O nome no log ("${logNome}") difere do nome cadastrado.</span></div>
+            </div>`;
+        }
+        // Mantém o AS-ID original do log - não sobrescreve
         meta.institutionName = transmissoraEncontrada.nome;
-        meta.asId = transmissoraEncontrada.id; 
     } else if (logAsId === "Não encontrado" || !logAsId) {
         validacaoInstHtml = `
-        <div class="validation-box error">
-            ${iconError}
+        <div class="validation-box warning">
+            ${iconWarning}
             <div><strong>Erro Crítico de Leitura:</strong> Cabeçalho FVP não identificado no log. AS-ID não encontrado.</div>
         </div>`;
         testPassed = false;
     } else {
+        // AS-ID não encontrado na base - alerta mas mostra o que veio do log
         validacaoInstHtml = `
-        <div class="validation-box error">
-            ${iconError}
-            <div><strong>Erro Crítico:</strong> O log retornou a instituição "<b>${logNome}</b>" (AS-ID: <strong>${logAsId}</strong>), mas ela não está na Tabela do Sistema.</div>
+        <div class="validation-box warning">
+            ${iconWarning}
+            <div><strong>AS-ID Não Cadastrado:</strong> O log contém AS-ID <strong>${logAsId}</strong> (instituição: "${logNome}"), mas não está na base de dados.</div>
         </div>`;
         testPassed = false;
     }
@@ -732,7 +826,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         <h3 class="file-header" style="justify-content: space-between;">
             <div style="display:flex; align-items:center;">
                 📄 ${fileName} 
-                <span class="badge" style="margin-left: 12px; font-size: 0.65rem;">Modo: ${tipoTesteLabel}</span>
+                <span class="badge badge-${isPF ? 'pf' : isPJ ? 'pj' : 'neutral'}" style="margin-left: 12px;">${tipoTesteLabel}</span>
             </div>
             <a href="${htmlBlobUrl}" target="_blank" class="btn-view-log">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
@@ -741,12 +835,14 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         </h3>
         
         ${validacaoInstHtml}
+        ${resolutionHintHtml}
         ${validacaoHtml}
 
         <div class="metadata-grid">
             <div class="metadata-item"><span>Auth. Server ID Oficial</span><strong>${meta.asId}</strong></div>
             <div class="metadata-item"><span>Marca Identificada</span><strong>${meta.institutionName}</strong></div>
             <div class="metadata-item"><span>Alias da Execução</span><strong>${meta.alias}</strong></div>
+            ${meta.authServerIssuer && meta.authServerIssuer !== "Não encontrado" ? `<div class="metadata-item"><span>Endpoint Base Utilizado</span><strong>${meta.authServerIssuer}</strong></div>` : ""}
             <div class="metadata-item"><span>Dispositivo / Client</span><strong>${meta.device}</strong></div>
             ${meta.cnpj && meta.cnpj !== "Não encontrado" ? `<div class="metadata-item"><span>CNPJ Detectado</span><strong>${meta.cnpj}</strong></div>` : ""}
         </div>

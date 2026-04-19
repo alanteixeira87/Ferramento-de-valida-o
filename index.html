@@ -13,35 +13,61 @@
 <body>
 
     <div id="loginScreen" class="login-wrapper">
-        <div class="login-box">
-            <div class="topbar-brand justify-center mb-4" style="text-align: center;">
-                <span class="logo-icon" style="font-size: 2rem;">⚡</span>
-                <h1 style="color: var(--text-title); margin-top: 8px;">QA Analytics</h1>
-            </div>
-            <p class="login-subtitle">Acesso restrito ao time de Qualidade.</p>
-            
-            <form id="loginForm">
-                <div class="input-group">
-                    <label for="passwordInput">Senha de Acesso</label>
-                    <input type="password" id="passwordInput" placeholder="Digite a senha..." required>
+        <div class="login-shell">
+            <section class="login-brand-panel">
+                <div class="login-brand-content">
+                    <div class="login-logo-wrap">
+                        <img src="./assets/logo.avif" alt="Logo QA Analytics" class="login-logo">
+                    </div>
+                    <span class="login-eyebrow">SIGC Quality Analytics</span>
+                    <h2>Auditoria inteligente para logs FVP</h2>
+                    <p>Centralize a leitura dos cenários, identifique a marca correta do teste e acelere a análise operacional com uma visão clara de validações, evidências e inconsistências.</p>
+                    <div class="login-highlights">
+                        <div class="login-highlight-card">
+                            <strong>Validação por endpoint</strong>
+                            <span>Relaciona o teste à marca correta com base nas rotas realmente executadas.</span>
+                        </div>
+                        <div class="login-highlight-card">
+                            <strong>Leitura estrutural</strong>
+                            <span>Aplica regras PF e PJ diretamente sobre os dados relevantes do log.</span>
+                        </div>
+                    </div>
                 </div>
-                <button type="submit" class="btn-primary w-full">Entrar no Dashboard</button>
-                <p id="loginError" style="color: var(--status-danger); display:none; margin-top: 10px; font-size: 0.85rem; text-align: center;">Senha incorreta. Tente novamente.</p>
-            </form>
+            </section>
+
+            <section class="login-form-panel">
+                <div class="login-box">
+                    <div class="login-box-header">
+                        <div>
+                            <h2>Entrar no Dashboard</h2>
+                            <p class="login-subtitle">Acesso restrito ao time de Qualidade.</p>
+                        </div>
+                    </div>
+
+                    <form id="loginForm">
+                        <div class="input-group">
+                            <label for="passwordInput">Senha de acesso</label>
+                            <input type="password" id="passwordInput" placeholder="Digite a senha..." required>
+                        </div>
+                        <button type="submit" class="btn-primary w-full">Entrar no dashboard</button>
+                        <p id="loginError" style="color: var(--status-danger); display:none; margin-top: 10px; font-size: 0.85rem; text-align: center;">Senha incorreta. Tente novamente.</p>
+                    </form>
+                </div>
+            </section>
         </div>
     </div>
 
     <div id="mainApp" class="dashboard-layout" style="display: none;">
-        
+
         <aside class="sidebar">
             <div class="sidebar-header">
-                <span class="logo-icon" style="font-size: 1.4rem;">⚡</span>
+                <img src="./assets/logo.avif" alt="Logo QA Analytics" class="sidebar-logo">
                 <h2>QA Analytics</h2>
             </div>
             <nav class="sidebar-nav">
                 <button id="btnNavTests" class="nav-btn active">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-                    Realizar Testes
+                    Realizar testes
                 </button>
                 <button id="btnNavDocs" class="nav-btn">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
@@ -49,15 +75,15 @@
                 </button>
             </nav>
             <div class="sidebar-footer">
-                <button id="logoutBtn" class="btn-outline w-full">Sair do Sistema</button>
+                <button id="logoutBtn" class="btn-outline w-full">Sair do sistema</button>
             </div>
         </aside>
 
         <main class="main-content">
-            
+
             <div id="viewTests" class="view-section active">
                 <header class="topbar">
-                    <h2>Auditoria de Logs FVP</h2>
+                    <h2>Auditoria de logs FVP</h2>
                     <p style="color: var(--text-muted); font-size: 0.9rem;">Importe os arquivos ZIP exportados para validação automática.</p>
                 </header>
 
@@ -68,7 +94,7 @@
                             <h3 style="color: var(--text-title);">Arraste os arquivos .zip para cá</h3>
                             <p>ou clique para selecionar do seu computador</p>
                             <input type="file" id="fileInput" accept=".zip" multiple style="display: none;">
-                            <button id="uploadBtn" class="btn-primary" style="margin-top: 16px;">Selecionar Arquivos</button>
+                            <button id="uploadBtn" class="btn-primary" style="margin-top: 16px;">Selecionar arquivos</button>
                         </div>
                     </div>
                 </section>
@@ -82,7 +108,7 @@
                         </div>
                         <button id="clearBtn" class="btn-outline danger-outline">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                            Limpar Mesa
+                            Limpar mesa
                         </button>
                     </div>
 
@@ -96,30 +122,62 @@
 
             <div id="viewDocs" class="view-section">
                 <header class="topbar">
-                    <h2>📖 Base de Conhecimento e Documentação</h2>
-                    <p style="color: var(--text-muted); font-size: 0.9rem;">Entenda as regras de negócio e validações da ferramenta.</p>
+                    <h2>Base de conhecimento e documentação</h2>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Entenda as regras de negócio e as validações da ferramenta.</p>
                 </header>
 
                 <div class="docs-content">
                     <div class="docs-card">
-                        <h3>1. Como o Motor de Busca Funciona?</h3>
-                        <p>O QA Analytics realiza a varredura dos logs extraídos do <strong>FVP</strong>. A principal missão é evitar Falsos Positivos causados por estruturas de Conglomerados.</p>
-                        <p>O motor cruza o <strong>CustomerFriendlyName</strong> contido no log com a tabela oficial de <strong>AS-IDs</strong>. Isso garante que a ferramenta não aponte erroneamente para a "Marca Matriz" (Ex: XP) caso o teste seja destinado a uma "Marca Filha" (Ex: Azimut).</p>
+                        <h3>1. Como a ferramenta foi estruturada</h3>
+                        <p>O QA Analytics foi desenvolvido para processar os arquivos ZIP exportados pelo <strong>FVP</strong>, abrir automaticamente o log HTML principal e transformar esse conteúdo em um painel de auditoria operacional.</p>
+                        <p>A aplicação possui quatro camadas principais: leitura do pacote ZIP, extração de metadados do log, aplicação das regras de validação e renderização visual dos resultados em cards.</p>
+                        <p>O objetivo da estrutura é centralizar em uma única tela as informações que normalmente ficariam espalhadas no HTML bruto do log, reduzindo a análise manual e destacando apenas os pontos que impactam a aprovação ou a reprovação do teste.</p>
                     </div>
 
                     <div class="docs-card">
-                        <h3>2. Validação Estrutural (PF vs PJ)</h3>
-                        <p>O sistema valida a presença de dados confidenciais com base na extensão do nome do arquivo ou do alias de execução:</p>
+                        <h3>2. Como os dados são extraídos</h3>
+                        <p>Após a leitura do ZIP, a ferramenta localiza o HTML do teste e extrai os principais campos técnicos do log, como <strong>AS-ID</strong>, <strong>CustomerFriendlyName</strong>, <strong>OrganisationName</strong>, <strong>alias</strong>, <strong>user-agent</strong>, indícios de <strong>BusinessEntity</strong> e presença de <strong>BrazilCNPJ</strong>.</p>
+                        <p>Quando o log contém múltiplos blocos de autorização para marcas do mesmo conglomerado, a ferramenta não usa apenas o primeiro registro encontrado. Ela compara os blocos disponíveis com os <strong>endpoints realmente exercitados no teste</strong>, como issuer, discovery, auth, token e endpoints de API, para identificar a marca correta do cenário executado.</p>
+                        <p>O resultado dessa etapa é consolidado no card com a marca identificada, o AS-ID oficial, o endpoint base utilizado na decisão e os metadados relevantes para auditoria.</p>
+                    </div>
+
+                    <div class="docs-card">
+                        <h3>3. Como as validações são apontadas</h3>
+                        <p>A validação principal acontece em duas frentes: consistência da instituição e consistência estrutural do cenário.</p>
                         <ul>
-                            <li><strong>Pessoa Física (PF):</strong> O arquivo <strong style="color: var(--status-danger);">REPROVA</strong> se houver vazamento das tags <code>BusinessEntity</code> ou <code>BrazilCNPJ</code> no corpo do log.</li>
-                            <li><strong>Pessoa Jurídica (PJ):</strong> O arquivo <strong style="color: var(--status-danger);">REPROVA</strong> se esses mesmos campos estiverem ausentes.</li>
+                            <li><strong>Validação da marca:</strong> o sistema cruza o AS-ID identificado com a base embarcada de AS-IDs e exibe a marca correspondente ao teste.</li>
+                            <li><strong>Validação PF/PJ:</strong> o sistema identifica o segmento a partir do alias e do nome do arquivo, classificando o cenário como PF ou PJ.</li>
+                            <li><strong>Validação de conteúdo:</strong> o sistema verifica se o log apresenta ou não estruturas como <code>BusinessEntity</code> e <code>BrazilCNPJ</code>, aplicando a regra esperada para cada segmento.</li>
+                            <li><strong>Validação de evidências:</strong> o sistema também inspeciona anexos do pacote, destacando imagens e documentos relevantes para a análise de NOK.</li>
                         </ul>
                     </div>
 
+                    <div class="docs-card">
+                        <h3>4. Regras de validação PF e PJ</h3>
+                        <p>O comportamento estrutural segue a regra de negócio do cenário executado:</p>
+                        <ul>
+                            <li><strong>Pessoa física (PF):</strong> a ferramenta só sinaliza <code>BusinessEntity</code> ou <code>BrazilCNPJ</code> como estrutura de PJ quando houver <strong>CNPJ efetivamente detectado no log</strong>. Fora disso, a presença isolada de texto técnico não gera reprovação automática.</li>
+                            <li><strong>Pessoa jurídica (PJ):</strong> a regra permanece rígida. O cenário é marcado com falha quando os campos esperados de PJ estiverem ausentes.</li>
+                        </ul>
+                        <p>Esse tratamento evita falso positivo em cenários PF sem perder a validação real dos cenários PJ.</p>
+                    </div>
+
                     <div class="docs-card highlight-card">
-                        <h3 style="color: var(--status-warning);">⚠️ Exceção de Regra de Negócio: Teste Custom Data Unique</h3>
-                        <p>Para o plano de testes <strong><code>customer_data_unique</code></strong>, é nativo que o termo <code>brazilCnpj</code> apareça no corpo de descrição do teste executado pelo FVP, independentemente de ser um cenário PF ou PJ.</p>
-                        <p><strong>Ação da Ferramenta:</strong> Para evitar reprovações incorretas de vazamento de dados, o QA Analytics possui uma trava de segurança. Se o nome do arquivo contiver "customer_data_unique", o sistema <strong>ignorará o BrazilCNPJ em testes PF</strong> e aprovará o arquivo, adicionando um alerta de auditoria em tela informando que a exceção foi aplicada com sucesso.</p>
+                        <h3 style="color: var(--status-warning);">5. Exceção de regra: Customer Data Unique</h3>
+                        <p>O plano <strong><code>customer_data_unique</code></strong> pode trazer a expressão <code>brazilCnpj</code> em trechos técnicos do próprio fluxo, especialmente na mensagem <code>AddProductTypeToPhase2Config - brazilCnpj is empty, setting product type to Personal</code>.</p>
+                        <p><strong>Tratamento aplicado:</strong> essa ocorrência específica é desconsiderada pela ferramenta para que a leitura não gere um falso positivo de estrutura PJ em cenários PF.</p>
+                        <p>Com isso, a validação continua ativa para ocorrências reais de <code>BrazilCNPJ</code>, mas ignora a mensagem técnica de configuração que não representa vazamento de dado estrutural.</p>
+                    </div>
+
+                    <div class="docs-card">
+                        <h3>6. Como interpretar os resultados em tela</h3>
+                        <ul>
+                            <li><strong>Contorno verde:</strong> cenário processado sem inconsistência estrutural.</li>
+                            <li><strong>Contorno vermelho:</strong> cenário com falha de validação ou NOK confirmado.</li>
+                            <li><strong>Caixa amarela:</strong> alerta operacional ou erro interno de leitura que exige análise, mas não representa automaticamente o mesmo tipo de falha estrutural de um NOK.</li>
+                            <li><strong>Badge PF/PJ:</strong> destaca visualmente o segmento interpretado pela ferramenta.</li>
+                            <li><strong>Endpoint base utilizado:</strong> mostra qual rota foi usada para decidir a marca correta do teste.</li>
+                        </ul>
                     </div>
                 </div>
             </div>
