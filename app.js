@@ -558,7 +558,7 @@ function extractAuthServerCandidates(htmlString) {
     return candidates;
 }
 
-function inferAuthServerFromLog(htmlString) {
+function inferAuthServerFromLog(htmlString, alias) {
     const decodedHtml = decodeHtmlEntities(htmlString);
     const candidates = extractAuthServerCandidates(decodedHtml);
 
@@ -566,11 +566,20 @@ function inferAuthServerFromLog(htmlString) {
 
     const observedUrls = decodedHtml.match(/https?:\/\/[^\s"'<>]+/gi) || [];
     const uniqueUrls = [...new Set(observedUrls)];
+    
+    // Tratamento de alias para peso forte na pontuação
+    const safeAlias = alias ? alias.toLowerCase().replace(/[^a-z0-9]/gi, '') : "";
 
     const scoreCandidate = (candidate) => {
         let score = 0;
         const issuer = candidate.issuer.replace(/\/+$/, '');
         const discoveryUrl = candidate.discoveryUrl.replace(/\/+$/, '');
+        
+        // Bonus brutal se o nome do banco bater com a intenção do Alias da execução
+        const candNameNorm = candidate.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+        if (safeAlias && candNameNorm && (safeAlias.includes(candNameNorm) || candNameNorm.includes(safeAlias) || safeAlias.startsWith(candNameNorm.substring(0,5)))) {
+            score += 100;
+        }
 
         uniqueUrls.forEach(url => {
             const normalizedUrl = url.replace(/\/+$/, '');
@@ -611,32 +620,134 @@ function inferAuthServerFromLog(htmlString) {
     return rankedCandidates[0] && rankedCandidates[0].score > 0 ? rankedCandidates[0] : null;
 }
 
+// --- NOVA FUNÇÃO DE VALIDAÇÃO DEFINITIVA (AGORA COM SUPORTE A ARRAYS E ALIAS) ---
+function extractDefinitiveAsId(htmlString, alias) {
+    let validData = null;
+    const safeAlias = alias ? alias.toLowerCase().replace(/[^a-z0-9]/g, '') : "";
+
+    // ESTRATÉGIA 1: Tabela de Configuração do Teste (Máxima Prioridade)
+    // Localiza a chave "server" que o motor do FVP carrega no momento exato do Play
+    const serverConfigRegex = /<t[dh][^>]*>\s*server\s*<\/t[dh]>[\s\S]{0,800}?<pre[^>]*>([\s\S]*?)<\/pre>/i;
+    const serverMatch = htmlString.match(serverConfigRegex);
+    
+    if (serverMatch) {
+        let jsonContent = decodeHtmlEntities(serverMatch[1].replace(/<[^>]+>/g, '').trim());
+        if (jsonContent.startsWith('"') && jsonContent.endsWith('"')) {
+            try { jsonContent = JSON.parse(jsonContent); } catch (e) {}
+        }
+        try {
+            const serverData = JSON.parse(jsonContent);
+            if (serverData && serverData.AuthorisationServerId) {
+                return {
+                    brandName: serverData.CustomerFriendlyName || "Não encontrado",
+                    asId: serverData.AuthorisationServerId.toLowerCase(),
+                    issuer: serverData.Issuer || "Não encontrado",
+                    discoveryUrl: serverData.OpenIDDiscoveryDocument || "Não encontrado",
+                    source: "Test Configuration Block"
+                };
+            }
+        } catch(e) {}
+    }
+
+    // ESTRATÉGIA 2: Bloco "Found auth server from participants endpoint"
+    // FVP costuma responder um array contendo todas as marcas do conglomerado atreladas ao CNPJ
+    const regex = /Found auth server from participants endpoint[\s\S]{0,800}?<pre[^>]*>([\s\S]*?)<\/pre>/gi;
+    let match;
+    
+    while ((match = regex.exec(htmlString)) !== null) {
+        let jsonContent = decodeHtmlEntities(match[1].replace(/<[^>]+>/g, '').trim());
+        
+        if (jsonContent.startsWith('"') && jsonContent.endsWith('"')) {
+            try { jsonContent = JSON.parse(jsonContent); } catch (e) {}
+        }
+
+        try {
+            let parsedData = JSON.parse(jsonContent);
+            
+            // Corrige o comportamento onde o motor devolve múltiplos servidores para conglomerados
+            let servers = Array.isArray(parsedData) ? parsedData : [parsedData];
+            let chosenServer = null;
+            
+            if (servers.length === 1) {
+                chosenServer = servers[0];
+            } else if (servers.length > 1) {
+                // Filtra o array focando estritamente na marca do alias do teste (ex: isola o modal da xp)
+                if (safeAlias) {
+                    chosenServer = servers.find(s => {
+                        const name = (s.CustomerFriendlyName || "").toLowerCase().replace(/[^a-z0-9]/g, '');
+                        return name && (safeAlias.includes(name) || name.includes(safeAlias));
+                    });
+                }
+                if (!chosenServer) chosenServer = servers[0];
+            }
+
+            if (chosenServer && chosenServer.AuthorisationServerId) {
+                validData = {
+                    brandName: chosenServer.CustomerFriendlyName || "Não encontrado",
+                    asId: chosenServer.AuthorisationServerId.toLowerCase(),
+                    issuer: chosenServer.Issuer || "Não encontrado",
+                    discoveryUrl: chosenServer.OpenIDDiscoveryDocument || "Não encontrado",
+                    source: "Participants Endpoint Match"
+                };
+            }
+        } catch (e) {}
+    }
+
+    return validData;
+}
+
 function extractMetadata(htmlString) {
-    const authServerInferido = inferAuthServerFromLog(htmlString);
     const extractJson = (key) => {
         const regex = new RegExp(`(?:\"|&quot;)${key}(?:\"|&quot;)\\s*:\\s*(?:\"|&quot;)([^\"&]+)(?:\"|&quot;)`, 'i');
         const match = htmlString.match(regex);
         return match ? match[1].trim() : "Não encontrado";
     };
 
-    let asId = authServerInferido?.asId || extractJson("AuthorisationServerId");
-    if (asId === "Não encontrado") asId = extractJson("authorisationServerId");
-    if (asId === "Não encontrado") asId = extractJson("as_id");
-    if (asId === "Não encontrado") asId = extractJson("as-id");
-    
-    if (asId === "Não encontrado") {
-        const asIdMatch = htmlString.match(/(?:AuthorisationServerId|authorisationServerId|as_id|as-id)[\s\S]{0,250}?(?:>|&quot;|")([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:<|&quot;|")/i);
-        if (asIdMatch) {
-            asId = asIdMatch[1].toLowerCase();
-        }
-    }
-
+    // 1. Extração prioritária do Alias para balizar a pesquisa de conglomerados (XP/Modal)
     let aliasMatch = htmlString.match(/(?:<td[^>]*>alias<\/td>|<th[^>]*>alias<\/th>)[\s\S]{0,1000}?<pre[^>]*>([^<]+)<\/pre>/i);
     let alias = aliasMatch ? decodeHtmlEntities(aliasMatch[1].trim()) : extractJson("alias");
     
-    let institutionName = authServerInferido?.name || extractJson("CustomerFriendlyName");
-    if (institutionName === "Não encontrado") institutionName = extractJson("OrganisationName");
+    // 2. Passa o alias para garantir que as buscas sejam isoladas por marca correta
+    const definitiveData = extractDefinitiveAsId(htmlString, alias);
+    const authServerInferido = inferAuthServerFromLog(htmlString, alias);
 
+    let asId = "Não encontrado";
+    let institutionName = "Não encontrado";
+    let authServerResolution = 'first-match';
+    let authServerIssuer = "Não encontrado";
+    let authServerDiscoveryUrl = "Não encontrado";
+
+    if (definitiveData && definitiveData.asId !== "Não encontrado") {
+        asId = definitiveData.asId;
+        institutionName = definitiveData.brandName;
+        authServerResolution = 'endpoint-definitive-match';
+        authServerIssuer = definitiveData.issuer;
+        authServerDiscoveryUrl = definitiveData.discoveryUrl;
+    } 
+    else {
+        asId = authServerInferido?.asId || extractJson("AuthorisationServerId");
+        if (asId === "Não encontrado") asId = extractJson("authorisationServerId");
+        if (asId === "Não encontrado") asId = extractJson("as_id");
+        if (asId === "Não encontrado") asId = extractJson("as-id");
+        
+        if (asId === "Não encontrado") {
+            const asIdMatch = htmlString.match(/(?:AuthorisationServerId|authorisationServerId|as_id|as-id)[\s\S]{0,250}?(?:>|&quot;|")([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:<|&quot;|")/i);
+            if (asIdMatch) {
+                asId = asIdMatch[1].toLowerCase();
+            }
+        }
+
+        institutionName = authServerInferido?.name || extractJson("CustomerFriendlyName");
+        if (institutionName === "Não encontrado") institutionName = extractJson("OrganisationName");
+        
+        if (authServerInferido) {
+            authServerResolution = 'endpoint-match';
+        }
+        
+        authServerIssuer = authServerInferido?.issuer || "Não encontrado";
+        authServerDiscoveryUrl = authServerInferido?.discoveryUrl || "Não encontrado";
+    }
+    
     let cnpjDaInstituicao = extractJson("brazilCNPJ");
     if (cnpjDaInstituicao === "Não encontrado") {
         const regexNested = /(?:"|&quot;)businessEntity(?:"|&quot;)\s*:\s*\{[\s\S]{0,300}?(?:"|&quot;)identification(?:"|&quot;)\s*:\s*(?:"|&quot;)([^"&]+)(?:"|&quot;)/i;
@@ -660,11 +771,16 @@ function extractMetadata(htmlString) {
     const temBrazilCnpj = hasMeaningfulBrazilCnpj(htmlString);
 
     return { 
-        alias, asId, cnpj: cnpjDaInstituicao, institutionName, 
-        temBusinessEntity, temBrazilCnpj, device: deviceLabel,
-        authServerResolution: authServerInferido ? 'endpoint-match' : 'first-match',
-        authServerIssuer: authServerInferido?.issuer || "NÃ£o encontrado",
-        authServerDiscoveryUrl: authServerInferido?.discoveryUrl || "NÃ£o encontrado"
+        alias, 
+        asId, 
+        cnpj: cnpjDaInstituicao, 
+        institutionName, 
+        temBusinessEntity, 
+        temBrazilCnpj, 
+        device: deviceLabel,
+        authServerResolution: authServerResolution,
+        authServerIssuer: authServerIssuer,
+        authServerDiscoveryUrl: authServerDiscoveryUrl
     };
 }
 
@@ -698,7 +814,10 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     let validacaoHtml = "";
     let validacaoInstHtml = "";
     const hasDetectedCnpj = !!(meta.cnpj && meta.cnpj !== "Não encontrado");
-    const resolutionHintHtml = meta.authServerResolution === 'endpoint-match'
+    
+    const resolutionHintHtml = meta.authServerResolution === 'endpoint-definitive-match'
+        ? `<div class="resolution-hint" style="background: rgba(33, 150, 243, 0.1); color: #2196f3; padding: 8px; border-radius: 4px; font-size: 0.85rem; margin-bottom: 12px; border: 1px solid rgba(33, 150, 243, 0.3);">🔍 <strong>Validação Exata:</strong> Marca isolada com precisão no momento do handshake (GetAuthServerFromParticipantsEndpoint).</div>`
+        : meta.authServerResolution === 'endpoint-match' 
         ? `<div class="resolution-hint">Marca resolvida pelo endpoint exercitado no teste: <strong>${meta.authServerIssuer}</strong></div>`
         : "";
 
@@ -764,22 +883,18 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         }
     }
 
-    // 2. Validação por AS-ID (Fonte Primária) - Sem sobrescrever pelo nome
-    // O AS-ID do log é a fonte oficial de validação, não o nome/alias
+    // 2. Validação por AS-ID (Fonte Primária)
     let transmissoraEncontrada = null;
     const logAsId = meta.asId;
     const logNome = meta.institutionName;
     
-    // Busca pelo AS-ID exato que está no log (fonte primária)
     transmissoraEncontrada = dbAsId[logAsId] ? { ...dbAsId[logAsId], id: logAsId } : null;
 
     if (transmissoraEncontrada) {
-        // O AS-ID foi encontrado na base - validar se o nome no log corresponde
         const normalize = str => str.toLowerCase().replace(/[^a-z0-9]/gi, '');
         const nomeNoLogNorm = logNome !== "Não encontrado" ? normalize(logNome) : "";
         const nomeValidoNorm = normalize(transmissoraEncontrada.nome);
         
-        // Verifica se o nome no log corresponde ao AS-ID (validação de consistência)
         const nomesCorrespondem = nomeNoLogNorm && (
             nomeNoLogNorm.includes(nomeValidoNorm) || 
             nomeValidoNorm.includes(nomeNoLogNorm)
@@ -792,14 +907,12 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
                 <div><strong>AS-ID Validado:</strong> O log pertence à marca <b>${transmissoraEncontrada.nome}</b> (AS-ID: ${logAsId})<br><span class="validation-detail">Endpoint base usado na identificação: ${meta.authServerIssuer}</span></div>
             </div>`;
         } else {
-            // Nome no log não corresponde ao AS-ID - alerta mas mantém o AS-ID como válido
             validacaoInstHtml = `
             <div class="validation-box success">
                 ${iconSuccess}
                 <div><strong>AS-ID Validado:</strong> O log pertence à marca <b>${transmissoraEncontrada.nome}</b> (AS-ID: ${logAsId})<br><span class="validation-detail">Endpoint base usado na identificação: ${meta.authServerIssuer}</span><br><span style="color: var(--status-warning); font-size: 0.85rem;">⚠️ Nota: O nome no log ("${logNome}") difere do nome cadastrado.</span></div>
             </div>`;
         }
-        // Mantém o AS-ID original do log - não sobrescreve
         meta.institutionName = transmissoraEncontrada.nome;
     } else if (logAsId === "Não encontrado" || !logAsId) {
         validacaoInstHtml = `
@@ -809,7 +922,6 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         </div>`;
         testPassed = false;
     } else {
-        // AS-ID não encontrado na base - alerta mas mostra o que veio do log
         validacaoInstHtml = `
         <div class="validation-box warning">
             ${iconWarning}
