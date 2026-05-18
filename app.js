@@ -703,9 +703,23 @@ function extractMetadata(htmlString) {
         return match ? match[1].trim() : "Não encontrado";
     };
 
+    const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const extractRowValue = (key) => {
+        const safeKey = escapeRegex(key);
+        const rowRegex = new RegExp(`<td[^>]*class=["']more-key["'][^>]*>\\s*${safeKey}\\s*<\\/td>[\\s\\S]*?<td[^>]*class=["']more-value["'][^>]*>[\\s\\S]*?<pre[^>]*class=["']more-text["'][^>]*>([\\s\\S]*?)<\\/pre>`, 'i');
+        const match = htmlString.match(rowRegex);
+        return match ? decodeHtmlEntities(match[1].trim()) : "Não encontrado";
+    };
+
+    const extractValue = (key) => {
+        const rowValue = extractRowValue(key);
+        if (rowValue !== "Não encontrado") return rowValue;
+        return extractJson(key);
+    };
+
     // 1. Extração prioritária do Alias para balizar a pesquisa de conglomerados (XP/Modal)
     let aliasMatch = htmlString.match(/(?:<td[^>]*>alias<\/td>|<th[^>]*>alias<\/th>)[\s\S]{0,1000}?<pre[^>]*>([^<]+)<\/pre>/i);
-    let alias = aliasMatch ? decodeHtmlEntities(aliasMatch[1].trim()) : extractJson("alias");
+    let alias = aliasMatch ? decodeHtmlEntities(aliasMatch[1].trim()) : extractValue("alias");
     
     // 2. Passa o alias para garantir que as buscas sejam isoladas por marca correta
     const definitiveData = extractDefinitiveAsId(htmlString, alias);
@@ -756,7 +770,7 @@ function extractMetadata(htmlString) {
     }
 
     let userAgentMatch = htmlString.match(/<td class="more-key">user-agent<\/td>[\s\S]{0,250}?<pre[^>]*>([^<]+)<\/pre>/i);
-    let userAgentRaw = userAgentMatch ? decodeHtmlEntities(userAgentMatch[1].trim()) : extractJson("user-agent");
+    let userAgentRaw = userAgentMatch ? decodeHtmlEntities(userAgentMatch[1].trim()) : extractValue("user-agent");
     
     let deviceLabel = `Outro`;
     if (userAgentRaw !== "Não encontrado") {
@@ -766,6 +780,21 @@ function extractMetadata(htmlString) {
         else if (ua.includes("windows") || ua.includes("macintosh") || ua.includes("linux")) deviceLabel = `Desktop`;
         else if (ua.includes("postman") || ua.includes("insomnia") || ua.includes("axios")) deviceLabel = `API Client`;
     }
+
+    const creditorFields = [
+        "creditorAccountIspb",
+        "creditorAccountIssuer",
+        "creditorAccountNumber",
+        "creditorAccountAccountType",
+        "creditorName",
+        "creditorCpfCnpj"
+    ];
+
+    const creditor = creditorFields.reduce((acc, key) => {
+        acc[key] = extractValue(key);
+        return acc;
+    }, {});
+    const hasCreditorData = Object.values(creditor).some(value => value !== "Não encontrado");
 
     const temBusinessEntity = hasMeaningfulBusinessEntity(htmlString);
     const temBrazilCnpj = hasMeaningfulBrazilCnpj(htmlString);
@@ -780,7 +809,9 @@ function extractMetadata(htmlString) {
         device: deviceLabel,
         authServerResolution: authServerResolution,
         authServerIssuer: authServerIssuer,
-        authServerDiscoveryUrl: authServerDiscoveryUrl
+        authServerDiscoveryUrl: authServerDiscoveryUrl,
+        creditor,
+        hasCreditorData
     };
 }
 
@@ -829,14 +860,16 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     const safeAlias = meta.alias && meta.alias !== "Não encontrado" ? meta.alias.toLowerCase() : "";
     const safeFileName = fileName ? fileName.toLowerCase() : "";
 
-    const isPF = safeAlias.includes('-pf') || safeFileName.includes('pf') || safeAlias.includes('personal');
-    const isPJ = safeAlias.includes('-pj') || safeFileName.includes('pj') || safeAlias.includes('business');
+    const pfToken = /(?:^|[_\-./])pf(?:$|[_\-./])/;
+    const pjToken = /(?:^|[_\-./])pj(?:$|[_\-./])/;
+    const isPF = pfToken.test(safeAlias) || pfToken.test(safeFileName) || safeAlias.includes('personal');
+    const isPJ = pjToken.test(safeAlias) || pjToken.test(safeFileName) || safeAlias.includes('business');
     let tipoTesteLabel = "Não Identificado";
 
     const temBusiness = meta.temBusinessEntity;
     const temCnpj = meta.temBrazilCnpj;
     
-    const isCustomDataUnique = safeFileName.includes('customer_data_unique') || safeAlias.includes('customer_data_unique');
+    const isCustomDataUnique = /customer[_-]data[_-]unique/.test(safeFileName) || /customer[_-]data[_-]unique/.test(safeAlias);
 
     // 1. Validação de Estrutura PF / PJ 
     if (isPF) {
@@ -933,6 +966,19 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
     const dataStatus = testPassed ? 'passed' : 'failed';
 
+    const creditorCardHtml = meta.hasCreditorData ? `
+        <div class="data-card">
+            <h4>Dados do Credor</h4>
+            <div class="data-card-grid">
+                <div class="data-card-item"><span>Creditor ISPB</span><strong>${meta.creditor.creditorAccountIspb}</strong></div>
+                <div class="data-card-item"><span>Creditor Issuer</span><strong>${meta.creditor.creditorAccountIssuer}</strong></div>
+                <div class="data-card-item"><span>Número da Conta</span><strong>${meta.creditor.creditorAccountNumber}</strong></div>
+                <div class="data-card-item"><span>Tipo de Conta</span><strong>${meta.creditor.creditorAccountAccountType}</strong></div>
+                <div class="data-card-item"><span>Nome do Credor</span><strong>${meta.creditor.creditorName}</strong></div>
+                <div class="data-card-item"><span>CPF / CNPJ do Credor</span><strong>${meta.creditor.creditorCpfCnpj}</strong></div>
+            </div>
+        </div>` : ``;
+
     let html = `
     <div class="file-report ${borderStatusClass}" data-status="${dataStatus}">
         <h3 class="file-header" style="justify-content: space-between;">
@@ -958,6 +1004,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             <div class="metadata-item"><span>Dispositivo / Client</span><strong>${meta.device}</strong></div>
             ${meta.cnpj && meta.cnpj !== "Não encontrado" ? `<div class="metadata-item"><span>CNPJ Detectado</span><strong>${meta.cnpj}</strong></div>` : ""}
         </div>
+        ${creditorCardHtml}
     `;
 
     if (!testPassed || evidencias.mostrarPainel) {
