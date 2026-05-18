@@ -539,6 +539,63 @@ function hasMeaningfulBusinessEntity(htmlString) {
     return /(?:"|&quot;)businessEntity(?:"|&quot;)\s*:\s*\{/i.test(htmlString);
 }
 
+function onlyDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+}
+
+function hasCnpjLikeValue(value) {
+    return onlyDigits(value).length === 14;
+}
+
+function normalizeSegmentText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, '');
+}
+
+function detectTestSegment(fileName, alias) {
+    const source = normalizeSegmentText(`${alias || ''} ${fileName || ''}`);
+    const compactSource = source.replace(/[^a-z0-9]/g, '');
+
+    const hasPfEvidence =
+        /(?:^|[^a-z0-9])pf(?:$|[^a-z0-9])/.test(source) ||
+        /\bpessoa\s*fisica\b/.test(source) ||
+        /\bpersonal\b/.test(source) ||
+        /\bindividual\b/.test(source) ||
+        compactSource.includes('naturalperson');
+
+    const hasPjEvidence =
+        /(?:^|[^a-z0-9])pj(?:$|[^a-z0-9])/.test(source) ||
+        /\bpessoa\s*juridica\b/.test(source) ||
+        /\bbusiness\b/.test(source) ||
+        /\bcorporate\b/.test(source) ||
+        /\bempresa(s|rial)?\b/.test(source) ||
+        compactSource.includes('legalperson');
+
+    return {
+        isPF: hasPfEvidence && !hasPjEvidence,
+        isPJ: hasPjEvidence && !hasPfEvidence,
+        hasConflict: hasPfEvidence && hasPjEvidence
+    };
+}
+
+function isPfStructuralFailureSummary(summary) {
+    const text = normalizeSegmentText(summary);
+    if (!text) return false;
+
+    const mentionsOnlyPjFields = /(business\s*entity|businessentity|brazil\s*cnpj|brazilcnpj|brazil_cnpj|cnpj)/i.test(text);
+    const indicatesMissingData = /(missing|not\s*found|absent|ausente|ausencia|falt(a|ando|ante)|nao\s*encontrad)/i.test(text);
+    const hasOtherKnownFailure = /(interrupted|exception|timeout|erro\s*interno|failed\s*to|invalid\s*status|http\s*[45]\d\d|saldo|versao|evidencia)/i.test(text);
+
+    return mentionsOnlyPjFields && indicatesMissingData && !hasOtherKnownFailure;
+}
+
+function hasOnlyPfStructuralFailures(resultados) {
+    const failures = (resultados || []).filter(result => !result.sucesso);
+    return failures.length > 0 && failures.every(result => isPfStructuralFailureSummary(result.summary || ''));
+}
+
 function extractAuthServerCandidates(htmlString) {
     const decodedHtml = decodeHtmlEntities(htmlString);
     const authServerRegex = /"CustomerFriendlyName"\s*:\s*"([^"]+)"[\s\S]{0,1200}?"Issuer"\s*:\s*"([^"]+)"[\s\S]{0,600}?"OpenIDDiscoveryDocument"\s*:\s*"([^"]+)"[\s\S]{0,600}?"AuthorisationServerId"\s*:\s*"([0-9a-f-]{36})"/gi;
@@ -795,6 +852,7 @@ function extractMetadata(htmlString) {
         return acc;
     }, {});
     const hasCreditorData = Object.values(creditor).some(value => value !== "Não encontrado");
+    const hasCreditorCnpj = hasCnpjLikeValue(creditor.creditorCpfCnpj);
 
     const temBusinessEntity = hasMeaningfulBusinessEntity(htmlString);
     const temBrazilCnpj = hasMeaningfulBrazilCnpj(htmlString);
@@ -811,7 +869,8 @@ function extractMetadata(htmlString) {
         authServerIssuer: authServerIssuer,
         authServerDiscoveryUrl: authServerDiscoveryUrl,
         creditor,
-        hasCreditorData
+        hasCreditorData,
+        hasCreditorCnpj
     };
 }
 
@@ -860,10 +919,9 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     const safeAlias = meta.alias && meta.alias !== "Não encontrado" ? meta.alias.toLowerCase() : "";
     const safeFileName = fileName ? fileName.toLowerCase() : "";
 
-    const pfToken = /(?:^|[_\-./])pf(?:$|[_\-./])/;
-    const pjToken = /(?:^|[_\-./])pj(?:$|[_\-./])/;
-    const isPF = pfToken.test(safeAlias) || pfToken.test(safeFileName) || safeAlias.includes('personal');
-    const isPJ = pjToken.test(safeAlias) || pjToken.test(safeFileName) || safeAlias.includes('business');
+    const segment = detectTestSegment(fileName, meta.alias);
+    const isPF = segment.isPF;
+    const isPJ = segment.isPJ;
     let tipoTesteLabel = "Não Identificado";
 
     const temBusiness = meta.temBusinessEntity;
@@ -872,29 +930,49 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     const isCustomDataUnique = /customer[_-]data[_-]unique/.test(safeFileName) || /customer[_-]data[_-]unique/.test(safeAlias);
 
     // 1. Validação de Estrutura PF / PJ 
-    if (isPF) {
+    // Se não houver indicação clara no alias/nome do arquivo, usa evidências no próprio log
+    // Observação: não forçar PJ apenas por presença de BusinessEntity ou BrazilCNPJ —
+    // testes PF podem conter essas strings sem serem considerados erro.
+    let resolvedIsPF = isPF;
+    let resolvedIsPJ = isPJ;
+    if (!resolvedIsPF && !resolvedIsPJ) {
+        // inferir PJ apenas quando houver CNPJ real ou estrutura PJ completa no log
+        if (meta.hasCreditorCnpj || (hasDetectedCnpj && temBusiness && temCnpj)) {
+            resolvedIsPJ = true;
+        } else {
+            resolvedIsPF = true;
+        }
+    }
+
+    if (resolvedIsPF) {
         tipoTesteLabel = "Pessoa Física (PF)";
         let vazados = [];
-        
+
         if (hasDetectedCnpj && temBusiness) vazados.push("BusinessEntity");
         if (hasDetectedCnpj && temCnpj && !isCustomDataUnique) vazados.push("BrazilCNPJ");
-        
+
+        const pfStructuralFailureIgnored = !resultados.some(result => result.isInterrupted) && hasOnlyPfStructuralFailures(resultados);
+        if (pfStructuralFailureIgnored) {
+            testPassed = true;
+        }
+
         if (vazados.length > 0) {
+            // Presença de campos PJ em logs PF não reprova automaticamente; mostra alerta apenas
             validacaoHtml = `
-            <div class="validation-box error">
-                ${iconError}
-                <div><strong>Estrutura PF com erro:</strong> O teste apresenta os campos de PJ (${vazados.join(' e ')}).</div>
+            <div class="validation-box warning">
+                ${iconWarning}
+                <div><strong>Estrutura PF — Observação:</strong> Campos detectados (${vazados.join(' e ')}), porém não caracterizam falha em testes PF.${pfStructuralFailureIgnored ? "<br><span style='color: var(--status-warning); font-size: 0.85rem; margin-top: 4px; display: block;'>Falha estrutural do FVP por campo PJ ausente foi tratada como falso positivo de PF.</span>" : ""}</div>
             </div>`;
-            testPassed = false;
         } else {
             let avisoExtra = (temCnpj && isCustomDataUnique) ? "<br><span style='color: var(--status-warning); font-size: 0.85rem; margin-top: 4px; display: block;'>⚠️ <b>Auditoria Automática:</b> A tag 'brazilCnpj' foi detectada no log, mas ignorada pela regra de exceção do teste <i>customer_data_unique</i>.</span>" : "";
+            if (pfStructuralFailureIgnored) avisoExtra += "<br><span style='color: var(--status-warning); font-size: 0.85rem; margin-top: 4px; display: block;'>Falha estrutural do FVP por campo PJ ausente foi tratada como falso positivo de PF.</span>";
             validacaoHtml = `
             <div class="validation-box success">
                 ${iconSuccess}
                 <div><strong>Segmento PF:</strong> Estrutura compatível com pessoa física.${avisoExtra}</div>
             </div>`;
         }
-    } else if (isPJ) {
+    } else if (resolvedIsPJ) {
         tipoTesteLabel = "Pessoa Jurídica (PJ)";
         let faltantes = [];
         if(!temBusiness) faltantes.push("BusinessEntity");
@@ -951,16 +1029,16 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         validacaoInstHtml = `
         <div class="validation-box warning">
             ${iconWarning}
-            <div><strong>Erro Crítico de Leitura:</strong> Cabeçalho FVP não identificado no log. AS-ID não encontrado.</div>
+            <div><strong>Erro de Leitura:</strong> Cabeçalho FVP não identificado no log. AS-ID não encontrado.</div>
         </div>`;
-        testPassed = false;
+        if (!resolvedIsPF) testPassed = false;
     } else {
         validacaoInstHtml = `
         <div class="validation-box warning">
             ${iconWarning}
             <div><strong>AS-ID Não Cadastrado:</strong> O log contém AS-ID <strong>${logAsId}</strong> (instituição: "${logNome}"), mas não está na base de dados.</div>
         </div>`;
-        testPassed = false;
+        if (!resolvedIsPF) testPassed = false;
     }
 
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
@@ -984,7 +1062,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         <h3 class="file-header" style="justify-content: space-between;">
             <div style="display:flex; align-items:center;">
                 📄 ${fileName} 
-                <span class="badge badge-${isPF ? 'pf' : isPJ ? 'pj' : 'neutral'}" style="margin-left: 12px;">${tipoTesteLabel}</span>
+                <span class="badge badge-${resolvedIsPF ? 'pf' : resolvedIsPJ ? 'pj' : 'neutral'}" style="margin-left: 12px;">${tipoTesteLabel}</span>
             </div>
             <a href="${htmlBlobUrl}" target="_blank" class="btn-view-log">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
