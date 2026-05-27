@@ -424,18 +424,38 @@ async function processFiles(files) {
 
     const loadingId = 'loading-' + Date.now();
     container.insertAdjacentHTML('afterbegin', `<div id="${loadingId}" style="text-align:center; padding: 20px; color: var(--color-primary); font-weight: 500;">A extrair ${files.length} arquivo(s)... ⚡</div>`);
+    const loadingEl = document.getElementById(loadingId);
+
+    const updateLoading = (text) => { if (loadingEl) loadingEl.textContent = text; };
+
+    // defensive: capture unhandled rejections while processing
+    const onUnhandledRejection = (ev) => {
+        console.error('Unhandled promise rejection during processing:', ev.reason);
+        if (loadingEl) loadingEl.textContent = 'Erro interno durante a extração (ver console).';
+    };
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
 
     let htmlFinal = "";
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         try {
+            updateLoading(`Processando ${i+1} de ${files.length}: ${file.name} ...`);
+            console.log(`Processando arquivo: ${file.name}`);
             const jsZip = new JSZip();
             const zip = await jsZip.loadAsync(file);
             const fileNames = Object.keys(zip.files);
             
             const htmlFileName = fileNames.find(name => name.toLowerCase().endsWith('.html') && !name.includes('__MACOSX'));
-            if (!htmlFileName) continue;
+            if (!htmlFileName) {
+                console.warn(`Nenhum arquivo HTML encontrado dentro do ZIP: ${file.name}`);
+                htmlFinal += `
+                <div class="file-report report-failed">
+                    <h3 class="file-header">⚠️ Arquivo sem HTML: ${file.name}</h3>
+                    <p style="padding: 10px; color: var(--status-warning); font-size: 0.9rem;">Nenhum arquivo HTML foi localizado dentro do pacote ZIP. Verifique se o export do FVP contém o arquivo HTML principal.</p>
+                </div>`;
+                continue;
+            }
 
             const htmlContent = await zip.file(htmlFileName).async("string");
             
@@ -462,15 +482,16 @@ async function processFiles(files) {
                 <h3 class="file-header">❌ Falha ao processar o arquivo: ${file.name}</h3>
                 <p style="padding: 10px; color: var(--status-warning); font-size: 0.9rem;">
                     Erro técnico na extração do log. <br>
-                    <strong>Detalhe:</strong> ${error.message}
+                    <strong>Detalhe:</strong> ${error && error.message ? error.message : String(error)}
                 </p>
             </div>`;
         }
     }
     
-    document.getElementById(loadingId)?.remove();
+    // cleanup
+    window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    if (loadingEl) loadingEl.remove();
     container.insertAdjacentHTML('afterbegin', htmlFinal);
-    
     updateScoreboard();
 }
 
@@ -778,6 +799,24 @@ function extractMetadata(htmlString) {
     let aliasMatch = htmlString.match(/(?:<td[^>]*>alias<\/td>|<th[^>]*>alias<\/th>)[\s\S]{0,1000}?<pre[^>]*>([^<]+)<\/pre>/i);
     let alias = aliasMatch ? decodeHtmlEntities(aliasMatch[1].trim()) : extractValue("alias");
     
+    // 1.b Extração do Test Name (varia entre logs, tenta múltiplos formatos)
+    const extractTestName = (str) => {
+        // procura chave em tabelas/rows
+        const byRow = extractRowValue('Test Name');
+        if (byRow && byRow !== 'Não encontrado') return byRow;
+        // tenta variações comuns
+        const variants = ['TestName', 'test-name', 'test name', 'test_name', 'Test name'];
+        for (const v of variants) {
+            const val = extractValue(v);
+            if (val && val !== 'Não encontrado') return val;
+        }
+        // procura título próximo de 'Test Summary' ou header contendo 'Test Name'
+        const headerMatch = str.match(/Test Name\s*[\:\-]?\s*<\/.*?>\s*([^<\n\r]+)/i) || str.match(/<h1[^>]*>\s*Test Name\s*<\/h1>[\s\S]{0,200}?<pre[^>]*>([\s\S]*?)<\/pre>/i);
+        if (headerMatch) return decodeHtmlEntities((headerMatch[1] || headerMatch[0]).trim());
+        return 'Não encontrado';
+    };
+    const testName = extractTestName(htmlString);
+    
     // 2. Passa o alias para garantir que as buscas sejam isoladas por marca correta
     const definitiveData = extractDefinitiveAsId(htmlString, alias);
     const authServerInferido = inferAuthServerFromLog(htmlString, alias);
@@ -859,6 +898,7 @@ function extractMetadata(htmlString) {
 
     return { 
         alias, 
+        testName,
         asId, 
         cnpj: cnpjDaInstituicao, 
         institutionName, 
@@ -1077,6 +1117,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         <div class="metadata-grid">
             <div class="metadata-item"><span>Auth. Server ID Oficial</span><strong>${meta.asId}</strong></div>
             <div class="metadata-item"><span>Marca Identificada</span><strong>${meta.institutionName}</strong></div>
+            ${meta.testName && meta.testName !== "Não encontrado" ? `<div class="metadata-item"><span>Test Name</span><strong>${meta.testName}</strong></div>` : ``}
             <div class="metadata-item"><span>Alias da Execução</span><strong>${meta.alias}</strong></div>
             ${meta.authServerIssuer && meta.authServerIssuer !== "Não encontrado" ? `<div class="metadata-item"><span>Endpoint Base Utilizado</span><strong>${meta.authServerIssuer}</strong></div>` : ""}
             <div class="metadata-item"><span>Dispositivo / Client</span><strong>${meta.device}</strong></div>
