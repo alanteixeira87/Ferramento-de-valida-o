@@ -10,8 +10,10 @@ const logoutBtn = document.getElementById('logoutBtn');
 
 const btnNavTests = document.getElementById('btnNavTests');
 const btnNavDocs = document.getElementById('btnNavDocs');
+const btnNavErrorAnalysis = document.getElementById('btnNavErrorAnalysis');
 const viewTests = document.getElementById('viewTests');
 const viewDocs = document.getElementById('viewDocs');
+const viewErrorAnalysis = document.getElementById('viewErrorAnalysis');
 
 if(loginForm) {
     loginForm.addEventListener('submit', (e) => {
@@ -35,20 +37,26 @@ if(logoutBtn) {
     });
 }
 
-if(btnNavTests && btnNavDocs && viewTests && viewDocs) {
-    btnNavTests.addEventListener('click', () => {
-        btnNavTests.classList.add('active');
-        btnNavDocs.classList.remove('active');
-        viewTests.classList.add('active');
-        viewDocs.classList.remove('active');
-    });
+function setActiveView(activeView) {
+    [btnNavTests, btnNavDocs, btnNavErrorAnalysis].forEach(btn => btn?.classList.remove('active'));
+    [viewTests, viewDocs, viewErrorAnalysis].forEach(view => view?.classList.remove('active'));
 
-    btnNavDocs.addEventListener('click', () => {
-        btnNavDocs.classList.add('active');
-        btnNavTests.classList.remove('active');
-        viewDocs.classList.add('active');
-        viewTests.classList.remove('active');
-    });
+    if (activeView === 'tests') {
+        btnNavTests?.classList.add('active');
+        viewTests?.classList.add('active');
+    } else if (activeView === 'docs') {
+        btnNavDocs?.classList.add('active');
+        viewDocs?.classList.add('active');
+    } else if (activeView === 'error') {
+        btnNavErrorAnalysis?.classList.add('active');
+        viewErrorAnalysis?.classList.add('active');
+    }
+}
+
+if(btnNavTests && btnNavDocs && viewTests && viewDocs) {
+    btnNavTests.addEventListener('click', () => setActiveView('tests'));
+    btnNavDocs.addEventListener('click', () => setActiveView('docs'));
+    btnNavErrorAnalysis?.addEventListener('click', () => setActiveView('error'));
 }
 
 // -------------------------------------------------------------
@@ -281,6 +289,8 @@ const dbAsId = {
 // -------------------------------------------------------------
 let dashboardStats = { all: 0, passed: 0, failed: 0 };
 let currentFilter = 'all';
+window.errorAnalyses = [];
+let currentErrorAnalysisId = null;
 
 const resultsHeader = document.getElementById('resultsHeader');
 const countAll = document.getElementById('countAll');
@@ -396,6 +406,305 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') lightboxNext.click();
 });
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function stripHtmlTags(value) {
+    return decodeHtmlEntities(String(value || ''))
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function truncateText(value, max = 220) {
+    const text = stripHtmlTags(value || '');
+    if (!text) return '';
+    return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function extractLogItems(htmlString) {
+    const itemRegex = /<div class="log-item">[\s\S]*?<table[\s\S]*?<\/table>\s*<\/div>/gi;
+    const resultRegex = /<span class="label result-([a-z]+)">/i;
+    const sourceRegex = /<div class="log-src">([\s\S]*?)<\/div>/i;
+    const messageRegex = /<div class="log-msg">([\s\S]*?)<\/div>/i;
+    const moreRegex = /<div class="more(?:\s+collapse)?".*?>([\s\S]*?)<\/div>\s*<\/td>\s*<\/tr>/i;
+    const detailRegex = /<td[^>]*class=["']more-key["'][^>]*>\s*([^<]+?)\s*<\/td>[\s\S]*?<td[^>]*class=["']more-value["'][^>]*>[\s\S]*?<pre[^>]*class=["'][^"']*more-(?:text|json|jwt)[^"']*["'][^>]*>([\s\S]*?)<\/pre>/gi;
+    const items = [];
+    let match;
+
+    while ((match = itemRegex.exec(htmlString)) !== null) {
+        const rawHtml = match[0];
+        const detailsHtml = rawHtml.match(moreRegex)?.[1] || '';
+        const details = [];
+        let detailMatch;
+
+        while ((detailMatch = detailRegex.exec(detailsHtml)) !== null) {
+            details.push({
+                key: decodeHtmlEntities(stripHtmlTags(detailMatch[1] || '')).trim(),
+                value: decodeHtmlEntities(stripHtmlTags(detailMatch[2] || '')).trim()
+            });
+        }
+
+        items.push({
+            rawHtml,
+            text: stripHtmlTags(rawHtml),
+            result: rawHtml.match(resultRegex)?.[1]?.toLowerCase() || '',
+            source: decodeHtmlEntities(stripHtmlTags(rawHtml.match(sourceRegex)?.[1] || '')).trim(),
+            message: decodeHtmlEntities(stripHtmlTags(rawHtml.match(messageRegex)?.[1] || '')).trim(),
+            details
+        });
+    }
+
+    return items;
+}
+
+function isErrorLogItem(item) {
+    if (!item) return false;
+    if (item.result === 'failure' || item.result === 'interrupted') return true;
+    if (item.result === 'success' || item.result === 'info') return false;
+
+    const text = `${item.source || ''} ${item.message || ''} ${item.text || ''}`.toLowerCase();
+    if (/no error|without error|error is not present/i.test(text)) return false;
+    return /(?:exception|failed|fatal|timeout|invalid|unauthorized|forbidden|bad request|http\s*[45]\d\d|status\s*[:=]\s*[45]\d\d|interrupted)/i.test(text);
+}
+
+function hasResponseData(item) {
+    if (!item || !Array.isArray(item.details)) return false;
+    return item.details.some(detail => /(?:^|_)(response|body|body_json|response_headers|response_body|access_token|id_token)(?:$|_)/i.test(detail.key));
+}
+
+function findScopedErrorData(htmlString) {
+    const items = extractLogItems(htmlString);
+    const firstErrorIndex = items.findIndex(isErrorLogItem);
+    const firstErrorItem = firstErrorIndex >= 0 ? items[firstErrorIndex] : null;
+    let responseItem = null;
+
+    if (firstErrorIndex > 0) {
+        for (let index = firstErrorIndex - 1; index >= 0; index -= 1) {
+            if (hasResponseData(items[index])) {
+                responseItem = items[index];
+                break;
+            }
+        }
+    }
+
+    return { items, firstErrorItem, responseItem };
+}
+
+function formatDetailPreview(details, maxItems = 4) {
+    if (!Array.isArray(details) || details.length === 0) return '';
+    return details
+        .filter(detail => detail && detail.key && detail.value)
+        .sort((left, right) => {
+            const leftPriority = /body_json|response_body|access_token|id_token/i.test(left.key) ? 0 : 1;
+            const rightPriority = /body_json|response_body|access_token|id_token/i.test(right.key) ? 0 : 1;
+            return leftPriority - rightPriority;
+        })
+        .slice(0, maxItems)
+        .map(detail => `${detail.key}: ${detail.value}`)
+        .join('\n');
+}
+
+function extractErrorContext(htmlString) {
+    const { firstErrorItem, responseItem } = findScopedErrorData(htmlString);
+    const sections = [];
+
+    if (responseItem) {
+        sections.push([
+            `Response anterior: ${responseItem.source || 'Bloco sem origem'} - ${responseItem.message || 'Sem mensagem'}`,
+            formatDetailPreview(responseItem.details.filter(detail => /(?:response|body|access_token|id_token)/i.test(detail.key)), 3)
+        ].filter(Boolean).join('\n'));
+    }
+
+    if (firstErrorItem) {
+        sections.push([
+            `Primeiro erro: ${firstErrorItem.source || 'Bloco sem origem'} - ${firstErrorItem.message || 'Sem mensagem'}`,
+            formatDetailPreview(firstErrorItem.details, 3)
+        ].filter(Boolean).join('\n'));
+    }
+
+    if (sections.length > 0) {
+        return sections.join('\n\n').trim();
+    }
+
+    const plain = stripHtmlTags(htmlString);
+    const patterns = [
+        /(?:error|exception|failed|fatal|timeout|invalid|unauthorized|forbidden|bad request|http\s*[45]\d\d|status\s*[:=]\s*[45]\d\d)/gi,
+        /(?:jwt|token|signature|expired|expirado)/gi
+    ];
+
+    for (const pattern of patterns) {
+        const match = pattern.exec(plain);
+        if (match && match.index !== undefined) {
+            const start = Math.max(0, match.index - 140);
+            const end = Math.min(plain.length, match.index + 260);
+            return plain.slice(start, end).replace(/\s+/g, ' ').trim();
+        }
+    }
+
+    return plain.slice(0, 260).replace(/\s+/g, ' ').trim();
+}
+
+function extractJwtTokens(sourceString) {
+    const text = stripHtmlTags(sourceString);
+    const regex = /\b([A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})\b/g;
+    const matches = [];
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+        matches.push(match[1]);
+    }
+
+    return [...new Set(matches)];
+}
+
+function decodeBase64Url(value) {
+    try {
+        const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+        const decoded = decodeURIComponent(
+            atob(padded)
+                .split('')
+                .map(char => `%${(`00${char.charCodeAt(0).toString(16)}`).slice(-2)}`)
+                .join('')
+        );
+        return JSON.parse(decoded);
+    } catch (_) {
+        return null;
+    }
+}
+
+function decodeJwtToken(token) {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+
+    return {
+        header: decodeBase64Url(parts[0]),
+        payload: decodeBase64Url(parts[1])
+    };
+}
+
+function inferLikelyCause(htmlString, fallbackSummary, meta) {
+    const text = `${stripHtmlTags(htmlString)} ${fallbackSummary || ''}`.toLowerCase();
+
+    if (/jwt|token|signature|expired|expirado|invalid/i.test(text)) {
+        return 'Possível erro de autenticação, token inválido ou JWT expirado.';
+    }
+    if (/401|403|unauthorized|forbidden/i.test(text)) {
+        return 'Falha de autorização ou credencial inválida retornada pelo fluxo.';
+    }
+    if (/timeout|timed out|deadline/i.test(text)) {
+        return 'Timeout ou indisponibilidade do serviço durante a execução.';
+    }
+    if (/network|connection|dns|ssl|certificate/i.test(text)) {
+        return 'Problema de conectividade ou certificado impedindo a chamada.';
+    }
+    if (/http\s*[45]\d\d/i.test(text)) {
+        return 'Resposta HTTP com falha identificada pelo endpoint.';
+    }
+    if (!meta?.asId || meta.asId === 'Não encontrado') {
+        return 'O cabeçalho do log não foi identificado corretamente.';
+    }
+    return 'Erro reportado no log e contexto extraído do fluxo.';
+}
+
+function buildErrorAnalysis(fileName, htmlString, meta, resultados) {
+    const scopedData = findScopedErrorData(htmlString);
+    const fallbackSummary = (resultados || []).find(item => item.summary && !item.sucesso && !item.isInterrupted)?.summary || '';
+    const errorSummary = scopedData.firstErrorItem?.message || fallbackSummary;
+    const scopedRawContent = [
+        scopedData.responseItem?.rawHtml || '',
+        scopedData.firstErrorItem?.rawHtml || ''
+    ].join('\n');
+    const context = extractErrorContext(htmlString);
+    const jwtTokens = extractJwtTokens(scopedRawContent || htmlString);
+    const decodedJwt = jwtTokens.map(token => ({ token, decoded: decodeJwtToken(token) })).filter(item => item.decoded);
+    const likelyCauseSource = [
+        scopedData.responseItem?.text || '',
+        scopedData.firstErrorItem?.text || '',
+        errorSummary || ''
+    ].join(' ');
+
+    return {
+        id: `analysis-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fileName,
+        summary: errorSummary,
+        likelyCause: inferLikelyCause(likelyCauseSource || htmlString, errorSummary, meta),
+        context,
+        jwtTokens,
+        decodedJwt,
+        createdAt: new Date().toLocaleString('pt-BR')
+    };
+}
+
+function renderErrorAnalysisPanel() {
+    const container = document.getElementById('errorAnalysisContent');
+    if (!container) return;
+
+    const analyses = Array.isArray(window.errorAnalyses) ? window.errorAnalyses : [];
+    if (!analyses.length) {
+        container.innerHTML = `<div class="empty-state"><p>Selecione um relatório para abrir a análise de erro.</p></div>`;
+        return;
+    }
+
+    const activeAnalysis = analyses.find(item => item.id === currentErrorAnalysisId) || analyses[analyses.length - 1];
+    currentErrorAnalysisId = activeAnalysis.id;
+
+    const listHtml = analyses.map(item => `
+        <button type="button" class="analysis-list-item ${item.id === activeAnalysis.id ? 'active' : ''}" onclick="window.showErrorAnalysis('${item.id}')">
+            <strong>${escapeHtml(item.fileName)}</strong>
+            <span>${escapeHtml(truncateText(item.likelyCause, 70))}</span>
+        </button>
+    `).join('');
+
+    const jwtHtml = activeAnalysis.jwtTokens.length > 0
+        ? activeAnalysis.decodedJwt.map(item => `
+            <div class="analysis-jwt-card">
+                <h4>JWT decodificado</h4>
+                <div class="analysis-jwt-meta">
+                    <span>Header: ${escapeHtml(JSON.stringify(item.decoded.header || {}))}</span>
+                    <span>Payload: ${escapeHtml(JSON.stringify(item.decoded.payload || {}))}</span>
+                </div>
+                <div class="analysis-jwt-token">${escapeHtml(item.token)}</div>
+                <a class="analysis-jwt-link" href="https://jwt.io/#debugger-io?token=${encodeURIComponent(item.token)}" target="_blank" rel="noreferrer">
+                    🔓 Abrir no jwt.io
+                </a>
+            </div>
+        `).join('')
+        : '<p>Nenhum JWT detectado no log analisado.</p>';
+
+    container.innerHTML = `
+        <div class="analysis-shell">
+            <div class="analysis-list">${listHtml}</div>
+            <div class="analysis-panel">
+                <div class="analysis-pill">🧠 ${escapeHtml(activeAnalysis.likelyCause)}</div>
+                <h3>${escapeHtml(activeAnalysis.fileName)}</h3>
+                <p><strong>Resumo do erro:</strong> ${escapeHtml(activeAnalysis.summary || 'Nenhum resumo adicional encontrado no log.')}</p>
+                <p><strong>Causa provável:</strong> ${escapeHtml(activeAnalysis.likelyCause)}</p>
+                <p><strong>Contexto do log:</strong></p>
+                <div class="analysis-snippet">${escapeHtml(activeAnalysis.context || 'Nenhum contexto relevante foi extraído do log.')}</div>
+                <div style="margin-top: 14px;">
+                    <strong>JWTs detectados</strong>
+                    ${jwtHtml}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+window.showErrorAnalysis = function(analysisId) {
+    currentErrorAnalysisId = analysisId;
+    setActiveView('error');
+    renderErrorAnalysisPanel();
+};
+
 // -------------------------------------------------------------
 // MOTOR PRINCIPAL E PROCESSAMENTO DE ARQUIVOS
 // -------------------------------------------------------------
@@ -464,10 +773,12 @@ async function processFiles(files) {
 
             const { metadata, resultados } = analyzeFvpLogs(htmlContent);
             const evidencias = await checkNokEvidences(zip, fileNames);
+            const errorAnalysis = buildErrorAnalysis(file.name, htmlContent, metadata, resultados);
+            window.errorAnalyses.push(errorAnalysis);
             
             let testPassed = resultados[0].sucesso === true;
 
-            const blockResult = generateFileBlock(file.name, metadata, resultados, evidencias, htmlBlobUrl, testPassed);
+            const blockResult = generateFileBlock(file.name, metadata, resultados, evidencias, htmlBlobUrl, testPassed, errorAnalysis);
             
             dashboardStats.all++;
             if (blockResult.isPassed) dashboardStats.passed++;
@@ -493,6 +804,7 @@ async function processFiles(files) {
     if (loadingEl) loadingEl.remove();
     container.insertAdjacentHTML('afterbegin', htmlFinal);
     updateScoreboard();
+    renderErrorAnalysisPanel();
 }
 
 // -------------------------------------------------------------
@@ -939,7 +1251,7 @@ function analyzeFvpLogs(htmlString) {
 // -------------------------------------------------------------
 // VALIDADOR FINAL (COM ÍCONES SVG DE ALTO NÍVEL)
 // -------------------------------------------------------------
-function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, testPassed) {
+function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, testPassed, errorAnalysis) {
     
     let validacaoHtml = "";
     let validacaoInstHtml = "";
@@ -1097,6 +1409,21 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             </div>
         </div>` : ``;
 
+    const errorAnalysisPreviewHtml = errorAnalysis ? `
+        <div class="analysis-preview-card" style="margin-bottom: 16px; padding: 12px 14px; border: 1px solid rgba(130, 87, 229, 0.25); border-radius: 10px; background: rgba(130, 87, 229, 0.08);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom: 8px;">
+                <strong style="color: var(--text-title);">🧠 Causa provável do erro</strong>
+                <button type="button" class="btn-view-log" onclick="window.showErrorAnalysis('${errorAnalysis.id}'); return false;">
+                    Ver análise completa
+                </button>
+            </div>
+            <p style="margin: 0; color: var(--text-base);">${escapeHtml(errorAnalysis.likelyCause)}</p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top: 8px; font-size: 0.78rem; color: var(--text-muted);">
+                <span>${errorAnalysis.jwtTokens.length ? `${errorAnalysis.jwtTokens.length} JWT detectado(s)` : 'Sem JWT detectado'}</span>
+                <span>${errorAnalysis.context ? 'Contexto extraído' : 'Sem contexto'}</span>
+            </div>
+        </div>` : '';
+
     let html = `
     <div class="file-report ${borderStatusClass}" data-status="${dataStatus}">
         <h3 class="file-header" style="justify-content: space-between;">
@@ -1104,15 +1431,18 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
                 📄 ${fileName} 
                 <span class="badge badge-${resolvedIsPF ? 'pf' : resolvedIsPJ ? 'pj' : 'neutral'}" style="margin-left: 12px;">${tipoTesteLabel}</span>
             </div>
-            <a href="${htmlBlobUrl}" target="_blank" class="btn-view-log">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                Abrir Log
-            </a>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+                <a href="${htmlBlobUrl}" target="_blank" class="btn-view-log">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                    Abrir Log
+                </a>
+            </div>
         </h3>
         
         ${validacaoInstHtml}
         ${resolutionHintHtml}
         ${validacaoHtml}
+        ${errorAnalysisPreviewHtml}
 
         <div class="metadata-grid">
             <div class="metadata-item"><span>Auth. Server ID Oficial</span><strong>${meta.asId}</strong></div>
