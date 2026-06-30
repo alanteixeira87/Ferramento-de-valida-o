@@ -480,22 +480,400 @@ function hasResponseData(item) {
     return item.details.some(detail => /(?:^|_)(response|body|body_json|response_headers|response_body|access_token|id_token)(?:$|_)/i.test(detail.key));
 }
 
+function hasRequestData(item) {
+    if (!item || !Array.isArray(item.details)) return false;
+    return item.details.some(detail => /(?:^|_)(request_method|request_headers|request_body|request_uri|url|resourceUrl|consentUrl|protected_resource_url|endpoint)(?:$|_)/i.test(detail.key));
+}
+
 function findScopedErrorData(htmlString) {
     const items = extractLogItems(htmlString);
     const firstErrorIndex = items.findIndex(isErrorLogItem);
     const firstErrorItem = firstErrorIndex >= 0 ? items[firstErrorIndex] : null;
     let responseItem = null;
+    let requestItem = null;
 
     if (firstErrorIndex > 0) {
         for (let index = firstErrorIndex - 1; index >= 0; index -= 1) {
-            if (hasResponseData(items[index])) {
+            if (!responseItem && hasResponseData(items[index])) {
                 responseItem = items[index];
+            }
+            if (!requestItem && hasRequestData(items[index])) {
+                requestItem = items[index];
+            }
+            if (responseItem && requestItem) {
                 break;
             }
         }
     }
 
-    return { items, firstErrorItem, responseItem };
+    return { items, firstErrorItem, responseItem, requestItem };
+}
+
+function cleanBulletSummary(text) {
+    return (text || '').replace(/^\s*-\s*/, '').trim();
+}
+
+function isGenericFailureSummary(text) {
+    const normalized = cleanBulletSummary(text).toLowerCase();
+    if (!normalized) return true;
+    return [
+        'setup done',
+        'test was interrupted before it could complete',
+        'o modulo de teste foi interrompido fatalmente pelo fvp',
+        'requested to stop via the conformance suite api'
+    ].some(item => normalized.includes(item));
+}
+
+function getDetailValue(details, keyPattern) {
+    if (!Array.isArray(details)) return '';
+    const detail = details.find(item => keyPattern.test(item.key || ''));
+    return detail?.value || '';
+}
+
+function parseStructuredValue(rawValue) {
+    if (!rawValue) return null;
+    const text = String(rawValue).trim();
+    if (!text) return null;
+    if (!/^[\[{]/.test(text)) return null;
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return null;
+    }
+}
+
+function normalizeHeaderMap(headersValue) {
+    const parsed = parseStructuredValue(headersValue);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return {};
+    return Object.keys(parsed).reduce((acc, key) => {
+        acc[String(key).toLowerCase()] = parsed[key];
+        return acc;
+    }, {});
+}
+
+function inferEndpointFamily(url) {
+    const source = String(url || '').toLowerCase();
+    if (!source) return '';
+    const families = [
+        'resources', 'consents', 'accounts', 'customers', 'credit-cards-accounts',
+        'financings', 'invoice-financings', 'loans', 'unarranged-accounts-overdraft',
+        'payments', 'enrollments', 'automatic-payments', 'sweeping', 'pix', 'funds',
+        'investments', 'bank-fixed-incomes', 'credit-fixed-incomes', 'variable-incomes',
+        'treasure-titles', 'exchanges'
+    ];
+
+    return families.find(family => source.includes(`/${family}`) || source.includes(family)) || '';
+}
+
+function inferScenarioMetadata(fileName, testName = '') {
+    const source = `${fileName || ''} ${testName || ''}`.toLowerCase();
+    const apiFamily = inferEndpointFamily(source) ||
+        (source.includes('sweeping') ? 'sweeping' : '') ||
+        (source.includes('enrollment') ? 'enrollments' : '') ||
+        (source.includes('consent') ? 'consents' : '') ||
+        (source.includes('payment') ? 'payments' : '') ||
+        (source.includes('pix') ? 'pix' : '');
+
+    let scenarioLabel = '';
+    if (source.includes('invalid par') || source.includes('invalid-par')) scenarioLabel = 'Fluxo com PAR invalido';
+    else if (source.includes('invalid request') || source.includes('invalid-request')) scenarioLabel = 'Fluxo com request invalido';
+    else if (source.includes('automatic')) scenarioLabel = 'Jornada automatica';
+    else if (source.includes('happy path')) scenarioLabel = 'Happy path';
+
+    const segment = source.includes(' pj ') || source.includes('- pj -') ? 'PJ' : source.includes(' pf ') || source.includes('- pf -') ? 'PF' : '';
+
+    return { apiFamily, scenarioLabel, segment };
+}
+
+function buildBodyHighlights(parsedBody) {
+    if (!parsedBody || typeof parsedBody !== 'object') return [];
+    const highlights = [];
+    const candidateEntries = [
+        ['code', parsedBody.code],
+        ['title', parsedBody.title],
+        ['detail', parsedBody.detail],
+        ['message', parsedBody.message],
+        ['status', parsedBody.status],
+        ['brandId', parsedBody.brandId],
+        ['consentId', parsedBody.consentId || parsedBody.data?.consentId],
+        ['paymentId', parsedBody.paymentId || parsedBody.data?.paymentId],
+        ['enrollmentId', parsedBody.enrollmentId || parsedBody.data?.enrollmentId],
+        ['interactionId', parsedBody.interactionId || parsedBody.meta?.interactionId]
+    ];
+
+    candidateEntries.forEach(([key, value]) => {
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+            highlights.push({ key, value: typeof value === 'string' ? value : JSON.stringify(value) });
+        }
+    });
+
+    if (Array.isArray(parsedBody.errors)) {
+        parsedBody.errors.slice(0, 3).forEach((errorItem, index) => {
+            if (errorItem && typeof errorItem === 'object') {
+                const detail = errorItem.detail || errorItem.title || errorItem.code || JSON.stringify(errorItem);
+                highlights.push({ key: `errors[${index}]`, value: String(detail) });
+            }
+        });
+    }
+
+    return highlights;
+}
+
+function buildErrorDetailHighlights(details) {
+    if (!Array.isArray(details)) return [];
+    return details
+        .filter(item => item && item.key && item.value && !/^createdon$/i.test(item.key))
+        .slice(0, 5)
+        .map(item => ({ key: item.key, value: item.value }));
+}
+
+function findLatestOperationalItem(items, predicate) {
+    if (!Array.isArray(items)) return null;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+        if (predicate(items[index])) return items[index];
+    }
+    return null;
+}
+
+function getResponseContext(responseItem, requestItem = null) {
+    if (!responseItem && !requestItem) {
+        return {
+            source: '',
+            message: '',
+            statusCode: '',
+            body: '',
+            headers: '',
+            endpointUrl: '',
+            requestMethod: '',
+            requestBody: '',
+            requestHeaders: '',
+            protectedResourceUrl: '',
+            endpointFamily: '',
+            requestId: '',
+            interactionId: '',
+            bodyParsed: null,
+            bodyHighlights: []
+        };
+    }
+
+    const responseDetails = responseItem?.details || [];
+    const requestDetails = requestItem?.details || responseDetails;
+    const responseHeaders = getDetailValue(responseDetails, /^response_headers$/i);
+    const requestHeaders = getDetailValue(requestDetails, /^request_headers$/i);
+    const body = getDetailValue(responseDetails, /^(body_json|response_body|body)$/i);
+    const bodyParsed = parseStructuredValue(body);
+    const normalizedHeaders = normalizeHeaderMap(responseHeaders);
+    const normalizedRequestHeaders = normalizeHeaderMap(requestHeaders);
+    const endpointUrl =
+        getDetailValue(responseDetails, /^(protected_resource_url|endpoint|resourceUrl|url|request_uri|uri|consentUrl)$/i) ||
+        getDetailValue(requestDetails, /^(protected_resource_url|endpoint|resourceUrl|url|request_uri|uri|consentUrl)$/i) ||
+        getDetailValue(responseDetails, /_url$/i) ||
+        getDetailValue(requestDetails, /_url$/i);
+    const interactionId =
+        normalizedHeaders['x-fapi-interaction-id'] ||
+        normalizedHeaders['interaction-id'] ||
+        bodyParsed?.meta?.interactionId ||
+        bodyParsed?.interactionId ||
+        '';
+
+    return {
+        source: responseItem?.source || requestItem?.source || '',
+        message: responseItem?.message || requestItem?.message || '',
+        statusCode: getDetailValue(responseDetails, /^response_status_code$/i),
+        body,
+        headers: responseHeaders,
+        endpointUrl,
+        requestMethod: getDetailValue(requestDetails, /^request_method$/i),
+        requestBody: getDetailValue(requestDetails, /^request_body$/i),
+        requestHeaders,
+        protectedResourceUrl: getDetailValue(responseDetails, /^protected_resource_url$/i) || getDetailValue(requestDetails, /^protected_resource_url$/i),
+        endpointFamily: inferEndpointFamily(endpointUrl),
+        requestId: normalizedHeaders['request-id'] || normalizedHeaders['x-request-id'] || normalizedRequestHeaders['request-id'] || '',
+        interactionId,
+        bodyParsed,
+        bodyHighlights: buildBodyHighlights(bodyParsed)
+    };
+}
+
+function classifyRootCause(summary, technicalError, responseContext, scopedData) {
+    const combinedText = [
+        summary,
+        technicalError,
+        responseContext.statusCode,
+        responseContext.body,
+        responseContext.headers,
+        scopedData?.firstErrorItem?.source || '',
+        scopedData?.responseItem?.source || ''
+    ].join(' ').toLowerCase();
+
+    if (/401|unauthorized/.test(combinedText)) {
+        return { code: 'auth', label: 'Autenticacao ou token invalido' };
+    }
+    if (/requested to stop via the conformance suite api|test was interrupted before it could complete/.test(combinedText)) {
+        return { code: 'interrupted_suite', label: 'Interrupcao solicitada pela suite' };
+    }
+    if (/403|forbidden|scope|permission/.test(combinedText)) {
+        return { code: 'permission', label: 'Escopo ou permissao insuficiente' };
+    }
+    if (/404|not[_\s-]*found/.test(combinedText)) {
+        return { code: 'not_found', label: 'Endpoint ou recurso nao encontrado' };
+    }
+    if (/429|too many requests|retry-after/.test(combinedText)) {
+        return { code: 'rate_limit', label: 'Limite de requisicoes excedido' };
+    }
+    if (/500|503|504|timeout|timed out|deadline/.test(combinedText)) {
+        return { code: 'availability', label: 'Indisponibilidade ou timeout' };
+    }
+    if (/jwt|token|signature|expired|expirado|nonce|c_hash|s_hash|at_hash|private_key_jwt/.test(combinedText)) {
+        return { code: 'jwt', label: 'Validacao criptografica ou JWT' };
+    }
+    if (/400|422|bad request|unprocessable/.test(combinedText)) {
+        return { code: 'payload', label: 'Payload ou contrato invalido' };
+    }
+    return { code: 'generic', label: 'Falha funcional identificada no fluxo' };
+}
+
+function buildValidationChecklist(rootCause, responseContext) {
+    const checklist = [];
+    const pushItem = (label, value) => {
+        checklist.push({ label, value: value || 'Nao identificado' });
+    };
+
+    pushItem('Metodo HTTP', responseContext.requestMethod);
+    pushItem('Status HTTP', responseContext.statusCode);
+    pushItem('Modulo da API', responseContext.endpointFamily || inferEndpointFamily(responseContext.protectedResourceUrl || responseContext.endpointUrl));
+    pushItem('Endpoint exercitado', responseContext.protectedResourceUrl || responseContext.endpointUrl);
+
+    if (responseContext.bodyHighlights?.length) {
+        responseContext.bodyHighlights.slice(0, 4).forEach(item => pushItem(item.key, item.value));
+    }
+
+    if (rootCause.code === 'not_found') {
+        pushItem('Validar rota/versionamento', 'Confirme se a rota e a versao da API existem para a marca e produto exercitados.');
+    }
+    if (rootCause.code === 'permission') {
+        pushItem('Validar consentimento', 'Confirme permission, status AUTHORISED e vinculo correto entre consentimento e recurso.');
+    }
+    if (rootCause.code === 'auth' || rootCause.code === 'jwt') {
+        pushItem('Validar autenticacao', 'Confira private_key_jwt, assinatura, exp, aud, iss e claims do token.');
+    }
+    if (rootCause.code === 'payload') {
+        pushItem('Validar contrato', 'Confira schema do request/response e campos obrigatorios do endpoint.');
+    }
+    if (rootCause.code === 'interrupted_suite') {
+        pushItem('Triagem operacional', 'Confirmar se o teste foi interrompido manualmente ou por automacao da suite antes da falha funcional.');
+    }
+
+    return checklist;
+}
+
+function buildOfficialRecommendations(rootCause, responseContext) {
+    const recommendations = [];
+
+    const addRecommendation = (title, detail, sourceLabel, sourceUrl) => {
+        recommendations.push({ title, detail, sourceLabel, sourceUrl });
+    };
+
+    if (rootCause.code === 'not_found') {
+        addRecommendation(
+            'Validar retorno 404',
+            'O material do Open Finance usa 404 quando o recurso solicitado nao existe ou nao foi implementado. Em APIs de dados, isso tambem pode indicar endpoint nao ofertado pela instituicao.',
+            'Open Banking Brasil - Codigos HTTP',
+            'https://openbanking-brasil.github.io/areadesenvolvedor/versions/v1.0.0-rc6.3/'
+        );
+    }
+
+    if (rootCause.code === 'auth') {
+        addRecommendation(
+            'Validar autenticacao e token',
+            'Para 401, confira se o header Authorization foi enviado corretamente e se o token nao esta ausente, invalido ou expirado.',
+            'Open Banking Brasil - Codigos HTTP',
+            'https://openbanking-brasil.github.io/areadesenvolvedor/versions/v1.0.0-rc6.3/'
+        );
+        addRecommendation(
+            'Validar claims e assinatura do ID Token',
+            'Na validacao OIDC, confira iss, aud, client_id, assinatura e demais regras do ID Token retornado pelo token endpoint.',
+            'OpenID Connect Core',
+            'https://openid.net/specs/openid-connect-core-1_0.html'
+        );
+    }
+
+    if (rootCause.code === 'permission') {
+        addRecommendation(
+            'Validar escopo e politica de acesso',
+            'Para 403, o material do Open Finance indica escopo incorreto ou violacao de politica de seguranca.',
+            'Open Banking Brasil - Codigos HTTP',
+            'https://openbanking-brasil.github.io/areadesenvolvedor/versions/v1.0.0-rc6.3/'
+        );
+        addRecommendation(
+            'Confirmar permission da API Resources',
+            'Na API /resources, a permission RESOURCES_READ deve ser solicitada no consentimento e o consentimento precisa estar AUTHORISED.',
+            'Open Finance Brasil - API Resources',
+            'https://openfinancebrasil.atlassian.net/wiki/spaces/OF/pages/277381214'
+        );
+    }
+
+    if (rootCause.code === 'availability') {
+        addRecommendation(
+            'Validar indisponibilidade transitória',
+            'Para 500, 503 e 504, o padrao trata o caso como falha do servico, indisponibilidade momentanea ou timeout.',
+            'Open Banking Brasil - Codigos HTTP',
+            'https://openbanking-brasil.github.io/areadesenvolvedor/versions/v1.0.0-rc6.3/'
+        );
+    }
+
+    if (rootCause.code === 'rate_limit') {
+        addRecommendation(
+            'Respeitar Retry-After',
+            'Para 429, o Open Finance espera cabecalho Retry-After informando quanto tempo o consumidor deve aguardar antes de tentar novamente.',
+            'Open Banking Brasil - Codigos HTTP',
+            'https://openbanking-brasil.github.io/areadesenvolvedor/versions/v1.0.0-rc6.3/'
+        );
+    }
+
+    if (rootCause.code === 'interrupted_suite') {
+        addRecommendation(
+            'Validar motivo da interrupcao na suite',
+            'Esse tipo de log normalmente indica interrupcao operacional ou parada manual na suite, nao erro funcional do endpoint. Verifique a causa da parada antes de analisar contrato da API.',
+            'FVP / Operacao de Suite',
+            'https://web.fvp.directory.openbankingbrasil.org.br'
+        );
+    }
+
+    if (rootCause.code === 'jwt' || responseContext.body) {
+        addRecommendation(
+            'Validar private_key_jwt e PAR',
+            'No perfil de seguranca do Open Finance Brasil, o authorization server deve usar private_key_jwt e exigir PAR no fluxo FAPI.',
+            'Open Finance Brasil FAPI Security Profile',
+            'https://openfinancebrasil.atlassian.net/wiki/spaces/DraftOF/pages/76283925/EN%2BOpen%2BFinance%2BBrasil%2BFinancial-grade%2BAPI%2BSecurity%2BProfile%2B1.0%2BImplementers%2BDraft%2B3'
+        );
+        addRecommendation(
+            'Validar nonce, c_hash, at_hash e s_hash quando aplicavel',
+            'OIDC e FAPI exigem validacao de claims e hashes do ID Token no hybrid flow, incluindo nonce, c_hash e s_hash; at_hash deve ser validado quando o access token vier junto.',
+            'OpenID Connect Core / FAPI Advanced',
+            'https://openid.net/specs/openid-connect-core-1_0.html'
+        );
+    }
+
+    if (/resources/i.test(`${responseContext.source} ${responseContext.message} ${responseContext.endpointUrl}`)) {
+        addRecommendation(
+            'Conferir regras especificas da API Resources',
+            'A API Resources so deve ser usada com consentimento AUTHORISED, com token vinculado ao consentId, permission RESOURCES_READ e status do recurso coerente com a disponibilidade da instituicao.',
+            'Open Finance Brasil - API Resources',
+            'https://openfinancebrasil.atlassian.net/wiki/spaces/OF/pages/277381214'
+        );
+    }
+
+    if (!recommendations.length) {
+        addRecommendation(
+            'Validar codigo HTTP e contrato da API',
+            'Use o codigo HTTP retornado como criterio principal de triagem e confirme se o comportamento do endpoint segue o padrao funcional do Open Finance.',
+            'Open Banking Brasil - Codigos HTTP',
+            'https://openbanking-brasil.github.io/areadesenvolvedor/versions/v1.0.0-rc6.3/'
+        );
+    }
+
+    return recommendations;
 }
 
 function formatDetailPreview(details, maxItems = 4) {
@@ -617,26 +995,61 @@ function inferLikelyCause(htmlString, fallbackSummary, meta) {
 
 function buildErrorAnalysis(fileName, htmlString, meta, resultados) {
     const scopedData = findScopedErrorData(htmlString);
+    const scenarioMetadata = inferScenarioMetadata(fileName, meta?.testName || '');
     const fallbackSummary = (resultados || []).find(item => item.summary && !item.sucesso && !item.isInterrupted)?.summary || '';
-    const errorSummary = scopedData.firstErrorItem?.message || fallbackSummary;
+    const firstTechnicalError = cleanBulletSummary(scopedData.firstErrorItem?.message || fallbackSummary);
+    const failureSummary = isGenericFailureSummary(fallbackSummary)
+        ? firstTechnicalError
+        : cleanBulletSummary(fallbackSummary || scopedData.firstErrorItem?.message || '');
     const scopedRawContent = [
         scopedData.responseItem?.rawHtml || '',
         scopedData.firstErrorItem?.rawHtml || ''
     ].join('\n');
+    const fallbackRequestItem = findLatestOperationalItem(scopedData.items, hasRequestData);
+    const fallbackResponseItem = findLatestOperationalItem(scopedData.items, hasResponseData);
+    const responseContext = getResponseContext(
+        scopedData.responseItem || fallbackResponseItem,
+        scopedData.requestItem || fallbackRequestItem
+    );
+    const rootCause = classifyRootCause(failureSummary, firstTechnicalError, responseContext, scopedData);
     const context = extractErrorContext(htmlString);
     const jwtTokens = extractJwtTokens(scopedRawContent || htmlString);
     const decodedJwt = jwtTokens.map(token => ({ token, decoded: decodeJwtToken(token) })).filter(item => item.decoded);
     const likelyCauseSource = [
         scopedData.responseItem?.text || '',
         scopedData.firstErrorItem?.text || '',
-        errorSummary || ''
+        firstTechnicalError || ''
     ].join(' ');
 
     return {
         id: `analysis-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         fileName,
-        summary: errorSummary,
-        likelyCause: inferLikelyCause(likelyCauseSource || htmlString, errorSummary, meta),
+        summary: failureSummary,
+        firstTechnicalError,
+        errorSource: scopedData.firstErrorItem?.source || '',
+        responseSource: responseContext.source,
+        responseMessage: responseContext.message,
+        responseStatus: responseContext.statusCode,
+        responseBody: responseContext.body,
+        responseHeaders: responseContext.headers,
+        endpointUrl: responseContext.endpointUrl,
+        requestMethod: responseContext.requestMethod,
+        requestBody: responseContext.requestBody,
+        requestHeaders: responseContext.requestHeaders,
+        protectedResourceUrl: responseContext.protectedResourceUrl,
+        requestId: responseContext.requestId,
+        interactionId: responseContext.interactionId,
+        endpointFamily: responseContext.endpointFamily || scenarioMetadata.apiFamily,
+        scenarioLabel: scenarioMetadata.scenarioLabel,
+        segment: scenarioMetadata.segment,
+        testName: meta?.testName || '',
+        testId: meta?.testId || '',
+        bodyHighlights: responseContext.bodyHighlights,
+        errorDetailHighlights: buildErrorDetailHighlights(scopedData.firstErrorItem?.details || []),
+        rootCause,
+        validationChecklist: buildValidationChecklist(rootCause, responseContext),
+        officialRecommendations: buildOfficialRecommendations(rootCause, responseContext),
+        likelyCause: inferLikelyCause(likelyCauseSource || htmlString, firstTechnicalError, meta),
         context,
         jwtTokens,
         decodedJwt,
@@ -687,9 +1100,152 @@ function renderErrorAnalysisPanel() {
                 <div class="analysis-pill">🧠 ${escapeHtml(activeAnalysis.likelyCause)}</div>
                 <h3>${escapeHtml(activeAnalysis.fileName)}</h3>
                 <p><strong>Resumo do erro:</strong> ${escapeHtml(activeAnalysis.summary || 'Nenhum resumo adicional encontrado no log.')}</p>
+                <p><strong>Primeiro erro tÃ©cnico:</strong> ${escapeHtml(activeAnalysis.firstTechnicalError || activeAnalysis.summary || 'Nenhum erro tÃ©cnico adicional encontrado no log.')}</p>
                 <p><strong>Causa provável:</strong> ${escapeHtml(activeAnalysis.likelyCause)}</p>
                 <p><strong>Contexto do log:</strong></p>
                 <div class="analysis-snippet">${escapeHtml(activeAnalysis.context || 'Nenhum contexto relevante foi extraído do log.')}</div>
+                <div style="margin-top: 14px;">
+                    <strong>JWTs detectados</strong>
+                    ${jwtHtml}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderErrorAnalysisPanel() {
+    const container = document.getElementById('errorAnalysisContent');
+    if (!container) return;
+
+    const analyses = Array.isArray(window.errorAnalyses) ? window.errorAnalyses : [];
+    if (!analyses.length) {
+        container.innerHTML = `<div class="empty-state"><p>Selecione um relatorio para abrir a analise de erro.</p></div>`;
+        return;
+    }
+
+    const activeAnalysis = analyses.find(item => item.id === currentErrorAnalysisId) || analyses[analyses.length - 1];
+    currentErrorAnalysisId = activeAnalysis.id;
+
+    const listHtml = analyses.map(item => `
+        <button type="button" class="analysis-list-item ${item.id === activeAnalysis.id ? 'active' : ''}" onclick="window.showErrorAnalysis('${item.id}')">
+            <strong>${escapeHtml(item.fileName)}</strong>
+            <span>${escapeHtml(truncateText(item.likelyCause, 70))}</span>
+        </button>
+    `).join('');
+
+    const jwtHtml = activeAnalysis.jwtTokens.length > 0
+        ? activeAnalysis.decodedJwt.map(item => `
+            <div class="analysis-jwt-card">
+                <h4>JWT decodificado</h4>
+                <div class="analysis-jwt-meta">
+                    <span>Header: ${escapeHtml(JSON.stringify(item.decoded.header || {}))}</span>
+                    <span>Payload: ${escapeHtml(JSON.stringify(item.decoded.payload || {}))}</span>
+                </div>
+                <div class="analysis-jwt-token">${escapeHtml(item.token)}</div>
+                <a class="analysis-jwt-link" href="https://jwt.io/#debugger-io?token=${encodeURIComponent(item.token)}" target="_blank" rel="noreferrer">
+                    Abrir no jwt.io
+                </a>
+            </div>
+        `).join('')
+        : '<p>Nenhum JWT detectado no log analisado.</p>';
+
+    const highlightsHtml = (activeAnalysis.bodyHighlights || []).length
+        ? `
+            <div class="analysis-detail-card">
+                <h4>Campos relevantes do body</h4>
+                <div class="analysis-kv-list">
+                    ${(activeAnalysis.bodyHighlights || []).map(item => `
+                        <div class="analysis-kv-row">
+                            <span>${escapeHtml(item.key || '')}</span>
+                            <strong>${escapeHtml(item.value || '')}</strong>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `
+        : '';
+
+    const technicalDetailsHtml = (activeAnalysis.errorDetailHighlights || []).length
+        ? `
+            <div class="analysis-detail-card">
+                <h4>Detalhes objetivos do erro</h4>
+                <div class="analysis-kv-list">
+                    ${(activeAnalysis.errorDetailHighlights || []).map(item => `
+                        <div class="analysis-kv-row">
+                            <span>${escapeHtml(item.key || '')}</span>
+                            <strong>${escapeHtml(item.value || '')}</strong>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `
+        : '';
+
+    const checklistHtml = (activeAnalysis.validationChecklist || []).length
+        ? `
+            <div class="analysis-detail-card">
+                <h4>Checklist objetivo de validacao</h4>
+                <div class="analysis-kv-list">
+                    ${(activeAnalysis.validationChecklist || []).map(item => `
+                        <div class="analysis-kv-row">
+                            <span>${escapeHtml(item.label || '')}</span>
+                            <strong>${escapeHtml(item.value || '')}</strong>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `
+        : '';
+
+    const responseHtml = `
+        <div class="analysis-detail-grid">
+            <div class="analysis-detail-card">
+                <h4>Erro principal</h4>
+                <p><strong>Resumo:</strong> ${escapeHtml(activeAnalysis.summary || 'Nao encontrado')}</p>
+                <p><strong>Erro tecnico:</strong> ${escapeHtml(activeAnalysis.firstTechnicalError || 'Nao encontrado')}</p>
+                <p><strong>Origem:</strong> ${escapeHtml(activeAnalysis.errorSource || 'Nao encontrada')}</p>
+                <p><strong>Cenario:</strong> ${escapeHtml(activeAnalysis.scenarioLabel || 'Nao identificado')}</p>
+                <p><strong>Segmento:</strong> ${escapeHtml(activeAnalysis.segment || 'Nao identificado')}</p>
+                <p><strong>Modulo:</strong> ${escapeHtml(activeAnalysis.testName || 'Nao identificado')}</p>
+                <p><strong>Test ID:</strong> ${escapeHtml(activeAnalysis.testId || 'Nao identificado')}</p>
+            </div>
+            <div class="analysis-detail-card">
+                <h4>Response relacionado</h4>
+                <p><strong>Origem:</strong> ${escapeHtml(activeAnalysis.responseSource || 'Nao encontrada')}</p>
+                <p><strong>Mensagem:</strong> ${escapeHtml(activeAnalysis.responseMessage || 'Nao encontrada')}</p>
+                <p><strong>Status HTTP:</strong> ${escapeHtml(activeAnalysis.responseStatus || 'Nao encontrado')}</p>
+                <p><strong>Modulo da API:</strong> ${escapeHtml(activeAnalysis.endpointFamily || 'Nao identificada')}</p>
+                <p><strong>Endpoint:</strong> ${escapeHtml(activeAnalysis.protectedResourceUrl || activeAnalysis.endpointUrl || 'Nao identificado')}</p>
+            </div>
+            ${highlightsHtml}
+            ${technicalDetailsHtml}
+            ${checklistHtml}
+        </div>
+        <div class="analysis-snippet" style="margin-top: 12px;">${escapeHtml(activeAnalysis.responseBody || 'Nenhum body relacionado foi identificado antes do primeiro erro.')}</div>
+    `;
+
+    const recommendationHtml = (activeAnalysis.officialRecommendations || []).map(item => `
+        <div class="analysis-recommendation-card">
+            <h4>${escapeHtml(item.title || 'Recomendacao oficial')}</h4>
+            <p>${escapeHtml(item.detail || '')}</p>
+            <a class="analysis-source-link" href="${escapeHtml(item.sourceUrl || '#')}" target="_blank" rel="noreferrer">${escapeHtml(item.sourceLabel || 'Fonte oficial')}</a>
+        </div>
+    `).join('');
+
+    container.innerHTML = `
+        <div class="analysis-shell">
+            <div class="analysis-list">${listHtml}</div>
+            <div class="analysis-panel">
+                <div class="analysis-pill">${escapeHtml(activeAnalysis.rootCause?.label || activeAnalysis.likelyCause)}</div>
+                <h3>${escapeHtml(activeAnalysis.fileName)}</h3>
+                <p><strong>Causa provavel:</strong> ${escapeHtml(activeAnalysis.likelyCause)}</p>
+                ${responseHtml}
+                <p><strong>Contexto do log:</strong></p>
+                <div class="analysis-snippet">${escapeHtml(activeAnalysis.context || 'Nenhum contexto relevante foi extraido do log.')}</div>
+                <div style="margin-top: 14px;">
+                    <strong>Recomendacoes oficiais para validacao</strong>
+                    <div class="analysis-recommendation-list">${recommendationHtml}</div>
+                </div>
                 <div style="margin-top: 14px;">
                     <strong>JWTs detectados</strong>
                     ${jwtHtml}
@@ -1128,6 +1684,32 @@ function extractMetadata(htmlString) {
         return 'Não encontrado';
     };
     const testName = extractTestName(htmlString);
+
+    const extractTestIdFromHeader = (str) => {
+        const spanMatch =
+            str.match(/<th[^>]*>\s*Test ID\s*<\/th>[\s\S]{0,500}?<span[^>]*>\s*([^<\s]+)\s*<\/span>/i) ||
+            str.match(/<td[^>]*>\s*Test ID\s*<\/td>[\s\S]{0,500}?<span[^>]*>\s*([^<\s]+)\s*<\/span>/i);
+        if (spanMatch) return decodeHtmlEntities(spanMatch[1].trim());
+
+        const linkMatch = str.match(/log-detail\.html\?public=true(?:&amp;|&)?log=([A-Za-z0-9_-]+)/i);
+        if (linkMatch) return decodeHtmlEntities(linkMatch[1].trim());
+
+        return '';
+    };
+
+    const extractTestId = (str) => {
+        const byRow = extractRowValue('Test ID');
+        if (byRow && byRow !== 'NÃ£o encontrado') return byRow;
+        const match = str.match(/<th>\s*Test ID\s*<\/th>[\s\S]{0,400}?<span>([^<]+)<\/span>/i);
+        if (match) return decodeHtmlEntities(match[1].trim());
+        const variants = ['TestId', 'testId', 'test-id', 'test_id'];
+        for (const variant of variants) {
+            const val = extractValue(variant);
+            if (val && val !== 'NÃ£o encontrado') return val;
+        }
+        return 'NÃ£o encontrado';
+    };
+    const testId = extractTestIdFromHeader(htmlString) || extractTestId(htmlString);
     
     // 2. Passa o alias para garantir que as buscas sejam isoladas por marca correta
     const definitiveData = extractDefinitiveAsId(htmlString, alias);
@@ -1222,7 +1804,8 @@ function extractMetadata(htmlString) {
         authServerDiscoveryUrl: authServerDiscoveryUrl,
         creditor,
         hasCreditorData,
-        hasCreditorCnpj
+        hasCreditorCnpj,
+        testId
     };
 }
 
@@ -1448,6 +2031,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             <div class="metadata-item"><span>Auth. Server ID Oficial</span><strong>${meta.asId}</strong></div>
             <div class="metadata-item"><span>Marca Identificada</span><strong>${meta.institutionName}</strong></div>
             ${meta.testName && meta.testName !== "Não encontrado" ? `<div class="metadata-item"><span>Test Name</span><strong>${meta.testName}</strong></div>` : ``}
+            ${meta.testId && meta.testId !== "Não encontrado" ? `<div class="metadata-item"><span>Test ID</span><strong>${meta.testId}</strong></div>` : ``}
             <div class="metadata-item"><span>Alias da Execução</span><strong>${meta.alias}</strong></div>
             ${meta.authServerIssuer && meta.authServerIssuer !== "Não encontrado" ? `<div class="metadata-item"><span>Endpoint Base Utilizado</span><strong>${meta.authServerIssuer}</strong></div>` : ""}
             <div class="metadata-item"><span>Dispositivo / Client</span><strong>${meta.device}</strong></div>
