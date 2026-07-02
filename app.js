@@ -1663,6 +1663,29 @@ function extractMetadata(htmlString) {
         return extractJson(key);
     };
 
+    const extractRunMetadata = () => {
+        const decodedHtml = decodeHtmlEntities(htmlString);
+        const source = `${htmlString}\n${decodedHtml}`;
+        const blockMatch = source.match(/["']?runMetadata["']?\s*:\s*\{([\s\S]{0,600}?)\}/i);
+        const block = blockMatch ? blockMatch[1] : source;
+
+        const findField = (key) => {
+            const regex = new RegExp(`["']?${key}["']?\\s*:\\s*(?:"([^"]*)"|'([^']*)'|([^,}\\s<]+))`, 'i');
+            const match = block.match(regex);
+            const value = match ? (match[1] || match[2] || match[3] || '').trim() : '';
+            return value ? decodeHtmlEntities(value) : "Não encontrado";
+        };
+
+        const type = findField('type');
+        const normalizedType = /^retest$/i.test(type) ? "Retest" : /^test$/i.test(type) ? "Test" : "Não encontrado";
+
+        return {
+            type: normalizedType,
+            cycle: findField('cycle'),
+            sdTicket: findField('sdTicket')
+        };
+    };
+
     // 1. Extração prioritária do Alias para balizar a pesquisa de conglomerados (XP/Modal)
     let aliasMatch = htmlString.match(/(?:<td[^>]*>alias<\/td>|<th[^>]*>alias<\/th>)[\s\S]{0,1000}?<pre[^>]*>([^<]+)<\/pre>/i);
     let alias = aliasMatch ? decodeHtmlEntities(aliasMatch[1].trim()) : extractValue("alias");
@@ -1710,6 +1733,7 @@ function extractMetadata(htmlString) {
         return 'NÃ£o encontrado';
     };
     const testId = extractTestIdFromHeader(htmlString) || extractTestId(htmlString);
+    const runMetadata = extractRunMetadata();
     
     // 2. Passa o alias para garantir que as buscas sejam isoladas por marca correta
     const definitiveData = extractDefinitiveAsId(htmlString, alias);
@@ -1805,7 +1829,10 @@ function extractMetadata(htmlString) {
         creditor,
         hasCreditorData,
         hasCreditorCnpj,
-        testId
+        testId,
+        runType: runMetadata.type,
+        runCycle: runMetadata.cycle,
+        sdTicket: runMetadata.sdTicket
     };
 }
 
@@ -2032,6 +2059,9 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             <div class="metadata-item"><span>Marca Identificada</span><strong>${meta.institutionName}</strong></div>
             ${meta.testName && meta.testName !== "Não encontrado" ? `<div class="metadata-item"><span>Test Name</span><strong>${meta.testName}</strong></div>` : ``}
             ${meta.testId && meta.testId !== "Não encontrado" ? `<div class="metadata-item"><span>Test ID</span><strong>${meta.testId}</strong></div>` : ``}
+            ${meta.runType && meta.runType !== "Não encontrado" ? `<div class="metadata-item"><span>Tipo da Execução</span><strong>${meta.runType}</strong></div>` : ``}
+            ${meta.runCycle && meta.runCycle !== "Não encontrado" ? `<div class="metadata-item"><span>Ciclo</span><strong>${meta.runCycle}</strong></div>` : ``}
+            ${meta.sdTicket && meta.sdTicket !== "Não encontrado" ? `<div class="metadata-item"><span>SD Ticket</span><strong>${meta.sdTicket}</strong></div>` : ``}
             <div class="metadata-item"><span>Alias da Execução</span><strong>${meta.alias}</strong></div>
             ${meta.authServerIssuer && meta.authServerIssuer !== "Não encontrado" ? `<div class="metadata-item"><span>Endpoint Base Utilizado</span><strong>${meta.authServerIssuer}</strong></div>` : ""}
             <div class="metadata-item"><span>Dispositivo / Client</span><strong>${meta.device}</strong></div>
