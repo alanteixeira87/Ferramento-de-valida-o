@@ -10,10 +10,8 @@ const logoutBtn = document.getElementById('logoutBtn');
 
 const btnNavTests = document.getElementById('btnNavTests');
 const btnNavDocs = document.getElementById('btnNavDocs');
-const btnNavErrorAnalysis = document.getElementById('btnNavErrorAnalysis');
 const viewTests = document.getElementById('viewTests');
 const viewDocs = document.getElementById('viewDocs');
-const viewErrorAnalysis = document.getElementById('viewErrorAnalysis');
 
 if(loginForm) {
     loginForm.addEventListener('submit', (e) => {
@@ -38,8 +36,8 @@ if(logoutBtn) {
 }
 
 function setActiveView(activeView) {
-    [btnNavTests, btnNavDocs, btnNavErrorAnalysis].forEach(btn => btn?.classList.remove('active'));
-    [viewTests, viewDocs, viewErrorAnalysis].forEach(view => view?.classList.remove('active'));
+    [btnNavTests, btnNavDocs].forEach(btn => btn?.classList.remove('active'));
+    [viewTests, viewDocs].forEach(view => view?.classList.remove('active'));
 
     if (activeView === 'tests') {
         btnNavTests?.classList.add('active');
@@ -47,16 +45,12 @@ function setActiveView(activeView) {
     } else if (activeView === 'docs') {
         btnNavDocs?.classList.add('active');
         viewDocs?.classList.add('active');
-    } else if (activeView === 'error') {
-        btnNavErrorAnalysis?.classList.add('active');
-        viewErrorAnalysis?.classList.add('active');
     }
 }
 
 if(btnNavTests && btnNavDocs && viewTests && viewDocs) {
     btnNavTests.addEventListener('click', () => setActiveView('tests'));
     btnNavDocs.addEventListener('click', () => setActiveView('docs'));
-    btnNavErrorAnalysis?.addEventListener('click', () => setActiveView('error'));
 }
 
 // -------------------------------------------------------------
@@ -289,15 +283,123 @@ const dbAsId = {
 // -------------------------------------------------------------
 let dashboardStats = { all: 0, passed: 0, failed: 0 };
 let currentFilter = 'all';
-window.errorAnalyses = [];
-let currentErrorAnalysisId = null;
-
 const resultsHeader = document.getElementById('resultsHeader');
 const countAll = document.getElementById('countAll');
 const countPassed = document.getElementById('countPassed');
 const countFailed = document.getElementById('countFailed');
 const clearBtn = document.getElementById('clearBtn');
 const filterBtns = document.querySelectorAll('.filter-btn');
+let activeOperationalTests = [];
+
+const operationalTestRules = [
+    {
+        id: 'automatic-payments_api_automatic-pix-scheduling_1-2_test-module_v2-2',
+        name: 'Automatic Pix Scheduling — Automatic Payments v2.2',
+        balance: 'R$ 1,00 disponível antes da liquidação em D+2.',
+        timeline: [['D+0', 'Criação e autorização, sem débito'], ['D+1', 'Sem débito'], ['D+2', 'Liquidação de R$ 1,00'], ['D+3', 'Validação pelo teste 2-2, sem novo débito']],
+        notes: ['Total esperado: R$ 1,00.', 'Verificar cheque especial ou limite ativo, pois ele pode financiar a liquidação.']
+    },
+    {
+        id: 'automatic-payments_api_automatic-pix-scheduling-retry_1-3_test-module_v2-2',
+        name: 'Automatic Pix Scheduling Retry — Automatic Payments v2.2',
+        balance: 'A conta deve permanecer com R$ 0,00 entre D+0 e D+2.',
+        timeline: [['D+0', 'Conta sem saldo'], ['D+1', 'Conta sem saldo'], ['D+2', 'Conta sem saldo'], ['D+3', 'Saldo indiferente']],
+        notes: ['Total esperado: R$ 0,00.', 'Cheque especial e limites devem estar desabilitados. Qualquer crédito entre D+0 e D+2 pode invalidar o cenário.']
+    },
+    {
+        id: 'automatic-payments_api_automatic-pix-scheduling-successful-retry_1-3_test-module_v2-2',
+        name: 'Automatic Pix Scheduling Successful Retry — Automatic Payments v2.2',
+        balance: 'R$ 0,00 entre D+0 e D+2; disponibilizar R$ 1,00 antes da tentativa em D+3.',
+        timeline: [['D+0', 'Conta sem saldo'], ['D+1', 'Conta sem saldo'], ['D+2', 'Conta sem saldo'], ['D+3', 'Crédito e liquidação de R$ 1,00']],
+        notes: ['Anexar a evidência do agendamento do crédito originado em outra instituição.', 'Cheque especial e limites devem estar desabilitados.']
+    },
+    {
+        id: 'enrollments_api_automatic-payments_automatic-pix-scheduling_1-2_test-module_v2-2',
+        name: 'Automatic Pix Scheduling — Enrollments v2.2',
+        balance: 'R$ 1,00 disponível antes da liquidação em D+2.',
+        timeline: [['D+0', 'Criação e autorização via JSR, sem débito'], ['D+1', 'Sem débito'], ['D+2', 'Liquidação de R$ 1,00'], ['D+3', 'Validação, sem novo débito']],
+        notes: ['Total esperado: R$ 1,00.', 'Verificar cheque especial ou limite ativo.']
+    },
+    {
+        id: 'enrollments_api_payments_scheduled-pix-verification_1-2_test-module_v4',
+        name: 'Scheduled Pix Verification — Enrollments v4',
+        balance: 'Saldo mínimo de R$ 2,00 antes de D+1.',
+        timeline: [['D+0', 'Sem débito'], ['D+1', 'Liquidação de R$ 1,00'], ['D+2', 'Liquidação de R$ 1,00'], ['D+3', 'Apenas validação']],
+        notes: ['Total esperado: R$ 2,00.', 'A execução utiliza Jornada sem Redirecionamento (JSR).']
+    },
+    {
+        id: 'payments_api_scheduled-pix-verification_1-2_test-module_v4',
+        name: 'Scheduled Pix Verification — Payments v4.0.1',
+        balance: 'Saldo mínimo de R$ 2,00 antes de D+1.',
+        timeline: [['D+0', 'Sem débito'], ['D+1', 'Liquidação de R$ 1,00'], ['D+2', 'Liquidação de R$ 1,00'], ['D+3', 'Validação pelo teste 2-2']],
+        notes: ['Total esperado: R$ 2,00.', 'A versão v4.0.1 está prevista para descontinuação em agosto de 2026.']
+    },
+    {
+        id: 'payments_api_scheduled-pix-verification_1-2_test-module_v5',
+        name: 'Scheduled Pix Verification — Payments v5.0.1',
+        balance: 'Saldo mínimo de R$ 2,00 antes de D+1.',
+        timeline: [['D+0', 'Sem débito'], ['D+1', 'Liquidação de R$ 1,00'], ['D+2', 'Liquidação de R$ 1,00'], ['D+3', 'Validação pelo teste 2-2']],
+        notes: ['Total esperado: R$ 2,00.', 'A indisponibilidade de saldo em D+1 ou D+2 pode comprometer a validação final.']
+    }
+];
+
+const operationalModalHtml = `
+<div id="operationalRulesModal" class="operational-modal" aria-hidden="true">
+    <div class="operational-modal-card">
+        <button type="button" id="operationalModalClose" class="operational-modal-close" aria-label="Fechar">&times;</button>
+        <h2>Orientações para teste de longa duração</h2>
+        <div id="operationalTestSelectorWrap">
+            <label for="operationalTestSelector">Teste operacional</label>
+            <select id="operationalTestSelector"></select>
+        </div>
+        <div id="operationalRuleContent"></div>
+    </div>
+</div>`;
+
+const operationalRulesModal = document.getElementById('operationalRulesModal');
+const operationalModalClose = document.getElementById('operationalModalClose');
+const operationalTestSelector = document.getElementById('operationalTestSelector');
+const operationalTestSelectorWrap = document.getElementById('operationalTestSelectorWrap');
+const operationalRuleContent = document.getElementById('operationalRuleContent');
+
+function findOperationalRule(testName) {
+    const normalized = String(testName || '').toLowerCase();
+    return operationalTestRules.find(rule => normalized.includes(rule.id.toLowerCase())) || null;
+}
+
+function renderOperationalRule(rule) {
+    if (!rule) return;
+    operationalRuleContent.innerHTML = `
+        <h3>${escapeHtml(rule.name)}</h3>
+        <p class="operational-balance"><strong>Regra de saldo:</strong> ${escapeHtml(rule.balance)}</p>
+        <div class="operational-timeline">
+            ${rule.timeline.map(([day, behavior]) => `
+                <div><strong>${escapeHtml(day)}</strong><span>${escapeHtml(behavior)}</span></div>
+            `).join('')}
+        </div>
+        <ul>${rule.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>
+        <code class="operational-test-id">${escapeHtml(rule.id)}</code>
+    `;
+}
+
+function openOperationalRulesModal() {
+    if (!activeOperationalTests.length) return;
+    operationalTestSelector.innerHTML = activeOperationalTests
+        .map(rule => `<option value="${escapeHtml(rule.id)}">${escapeHtml(rule.name)}</option>`)
+        .join('');
+    operationalTestSelectorWrap.style.display = activeOperationalTests.length > 1 ? 'block' : 'none';
+    renderOperationalRule(activeOperationalTests[0]);
+    operationalRulesModal.classList.add('active');
+    operationalRulesModal.setAttribute('aria-hidden', 'false');
+}
+
+operationalTestSelector?.addEventListener('change', () => {
+    renderOperationalRule(activeOperationalTests.find(rule => rule.id === operationalTestSelector.value));
+});
+operationalModalClose?.addEventListener('click', () => operationalRulesModal.classList.remove('active'));
+operationalRulesModal?.addEventListener('click', event => {
+    if (event.target === operationalRulesModal) operationalRulesModal.classList.remove('active');
+});
 
 function updateScoreboard() {
     if (dashboardStats.all > 0 && resultsHeader) {
@@ -1255,12 +1357,6 @@ function renderErrorAnalysisPanel() {
     `;
 }
 
-window.showErrorAnalysis = function(analysisId) {
-    currentErrorAnalysisId = analysisId;
-    setActiveView('error');
-    renderErrorAnalysisPanel();
-};
-
 // -------------------------------------------------------------
 // MOTOR PRINCIPAL E PROCESSAMENTO DE ARQUIVOS
 // -------------------------------------------------------------
@@ -1329,12 +1425,9 @@ async function processFiles(files) {
 
             const { metadata, resultados } = analyzeFvpLogs(htmlContent);
             const evidencias = await checkNokEvidences(zip, fileNames);
-            const errorAnalysis = buildErrorAnalysis(file.name, htmlContent, metadata, resultados);
-            window.errorAnalyses.push(errorAnalysis);
-            
             let testPassed = resultados[0].sucesso === true;
 
-            const blockResult = generateFileBlock(file.name, metadata, resultados, evidencias, htmlBlobUrl, testPassed, errorAnalysis);
+            const blockResult = generateFileBlock(file.name, metadata, resultados, evidencias, htmlBlobUrl, testPassed);
             
             dashboardStats.all++;
             if (blockResult.isPassed) dashboardStats.passed++;
@@ -1360,12 +1453,88 @@ async function processFiles(files) {
     if (loadingEl) loadingEl.remove();
     container.insertAdjacentHTML('afterbegin', htmlFinal);
     updateScoreboard();
-    renderErrorAnalysisPanel();
 }
 
 // -------------------------------------------------------------
 // EXTRAÇÃO DE EVIDÊNCIAS E GERAÇÃO DE MINIATURAS
 // -------------------------------------------------------------
+function readJpegCreationDate(arrayBuffer) {
+    try {
+        const view = new DataView(arrayBuffer);
+        if (view.getUint16(0, false) !== 0xFFD8) return null;
+        let offset = 2;
+
+        while (offset + 4 < view.byteLength) {
+            const marker = view.getUint16(offset, false);
+            const length = view.getUint16(offset + 2, false);
+            if (marker === 0xFFE1 && length >= 10) {
+                const exif = String.fromCharCode(...new Uint8Array(arrayBuffer, offset + 4, 6));
+                if (exif !== 'Exif\u0000\u0000') return null;
+                const tiff = offset + 10;
+                const littleEndian = view.getUint16(tiff, false) === 0x4949;
+                const get16 = pos => view.getUint16(pos, littleEndian);
+                const get32 = pos => view.getUint32(pos, littleEndian);
+
+                const readIfd = ifdOffset => {
+                    const start = tiff + ifdOffset;
+                    const entries = get16(start);
+                    const values = {};
+                    for (let i = 0; i < entries; i++) {
+                        const entry = start + 2 + (i * 12);
+                        const tag = get16(entry);
+                        const count = get32(entry + 4);
+                        if (tag === 0x8769) values.exifIfd = get32(entry + 8);
+                        if ((tag === 0x0132 || tag === 0x9003 || tag === 0x9004) && count > 0) {
+                            const valueOffset = count <= 4 ? entry + 8 : tiff + get32(entry + 8);
+                            values[tag] = new TextDecoder().decode(
+                                new Uint8Array(arrayBuffer, valueOffset, Math.min(count, 32))
+                            ).replace(/\0/g, '').trim();
+                        }
+                    }
+                    return values;
+                };
+
+                const base = readIfd(get32(tiff + 4));
+                const exifValues = base.exifIfd ? readIfd(base.exifIfd) : {};
+                const raw = exifValues[0x9003] || exifValues[0x9004] || base[0x0132];
+                if (!raw) return null;
+                const match = raw.match(/(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+                if (!match) return null;
+                const [, year, month, day, hour, minute, second] = match;
+                return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}-03:00`);
+            }
+            if (!length || length < 2) break;
+            offset += 2 + length;
+        }
+    } catch (_) {}
+    return null;
+}
+
+function formatBrasiliaDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return 'Não identificado';
+    return new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        dateStyle: 'short',
+        timeStyle: 'medium'
+    }).format(date);
+}
+
+function formatTimeDifference(milliseconds) {
+    if (!Number.isFinite(milliseconds)) return 'Não calculada';
+    const prefix = milliseconds < 0 ? '-' : '';
+    let seconds = Math.round(Math.abs(milliseconds) / 1000);
+    const days = Math.floor(seconds / 86400);
+    seconds %= 86400;
+    const hours = Math.floor(seconds / 3600);
+    seconds %= 3600;
+    const minutes = Math.floor(seconds / 60);
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours || days) parts.push(`${hours}h`);
+    parts.push(`${minutes}min`);
+    return `${prefix}${parts.join(' ')}`;
+}
+
 async function checkNokEvidences(zip, filePaths) {
     const imagensExtraidas = [];
     let indicioDeNok = false; 
@@ -1376,10 +1545,15 @@ async function checkNokEvidences(zip, filePaths) {
         
         if (pathLower.match(/\.(jpg|jpeg|png|pdf)$/)) {
             const fileName = path.split('/').pop();
-            const blob = await zip.file(path).async("blob");
+            const zipEntry = zip.file(path);
+            const blob = await zipEntry.async("blob");
             const objectUrl = URL.createObjectURL(blob);
             
-            imagensExtraidas.push({ nome: fileName, url: objectUrl, isPdf: pathLower.endsWith('.pdf') });
+            imagensExtraidas.push({
+                nome: fileName,
+                url: objectUrl,
+                isPdf: pathLower.endsWith('.pdf')
+            });
         }
     }
 
@@ -1734,6 +1908,18 @@ function extractMetadata(htmlString) {
     };
     const testId = extractTestIdFromHeader(htmlString) || extractTestId(htmlString);
     const runMetadata = extractRunMetadata();
+    const extractHeaderDate = label => {
+        const match = htmlString.match(new RegExp(`<th[^>]*>\\s*${label}\\s*<\\/th>[\\s\\S]{0,200}?<td[^>]*>\\s*([^<]+)`, 'i'));
+        if (!match) return null;
+        const raw = decodeHtmlEntities(match[1]).trim();
+        const normalized = raw
+            .replace(/\s*\(UTC\)\s*$/i, 'Z')
+            .replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})Z$/, '$1T$2Z');
+        const parsed = new Date(normalized);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+    const executionCreatedDate = extractHeaderDate('Created');
+    const exportedDate = extractHeaderDate('Exported');
     
     // 2. Passa o alias para garantir que as buscas sejam isoladas por marca correta
     const definitiveData = extractDefinitiveAsId(htmlString, alias);
@@ -1832,7 +2018,63 @@ function extractMetadata(htmlString) {
         testId,
         runType: runMetadata.type,
         runCycle: runMetadata.cycle,
-        sdTicket: runMetadata.sdTicket
+        sdTicket: runMetadata.sdTicket,
+        executionCreatedUtc: executionCreatedDate?.toISOString() || '',
+        executionCreatedBrasilia: formatBrasiliaDate(executionCreatedDate),
+        exportedBrasilia: formatBrasiliaDate(exportedDate),
+        executionToExportDifference: executionCreatedDate && exportedDate
+            ? formatTimeDifference(exportedDate.getTime() - executionCreatedDate.getTime())
+            : 'Não calculada'
+    };
+}
+
+function extractRequestOrigin(htmlString, logAnchor) {
+    if (!logAnchor) return null;
+    const anchorPosition = htmlString.search(
+        new RegExp(`id=["']${logAnchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`, 'i')
+    );
+    if (anchorPosition < 0) return null;
+
+    const contextStart = Math.max(0, anchorPosition - 140000);
+    const contextEnd = Math.min(htmlString.length, anchorPosition + 15000);
+    const context = htmlString.slice(contextStart, contextEnd);
+    const detailRegex = /<td[^>]*class=["']more-key["'][^>]*>\s*([^<]+?)\s*<\/td>[\s\S]*?<pre[^>]*class=["'][^"']*more-(?:text|json|jwt)[^"']*["'][^>]*>([\s\S]*?)<\/pre>/gi;
+    let detailMatch;
+    let method = '';
+    let url = '';
+    let status = '';
+    let requestLogAnchor = '';
+
+    while ((detailMatch = detailRegex.exec(context)) !== null) {
+        const key = stripHtmlTags(detailMatch[1]).toLowerCase();
+        const value = decodeHtmlEntities(stripHtmlTags(detailMatch[2])).trim();
+        if (/^request_method$/.test(key)) method = value;
+        if (/^(?:request_uri|request_url|protected_resource_url)$/.test(key)) {
+            url = value;
+            status = '';
+            const tablesBeforeDetail = [
+                ...context.slice(0, detailMatch.index).matchAll(/<table[^>]*\sid=["']([^"']+)["'][^>]*>/gi)
+            ];
+            requestLogAnchor = tablesBeforeDetail.at(-1)?.[1] || '';
+        }
+        if (/^redirect_to_authorization_endpoint$/.test(key)) {
+            url = value;
+            status = '';
+            method = 'GET';
+            const tablesBeforeDetail = [
+                ...context.slice(0, detailMatch.index).matchAll(/<table[^>]*\sid=["']([^"']+)["'][^>]*>/gi)
+            ];
+            requestLogAnchor = tablesBeforeDetail.at(-1)?.[1] || '';
+        }
+        if (/^response_status_code$/.test(key)) status = value;
+    }
+
+    if (!url && !method) return null;
+    return {
+        method: method || 'Método não identificado',
+        url: url || 'Endpoint não identificado',
+        status,
+        logAnchor: requestLogAnchor
     };
 }
 
@@ -1845,8 +2087,32 @@ function analyzeFvpLogs(htmlString) {
     let match;
 
     while ((match = failureBlockRegex.exec(htmlString)) !== null) {
-        let erroLimpo = match[1].replace(/<li[^>]*>/gi, "\n- ").replace(/<\/?[^>]+(>|$)/g, "").trim();
-        if (erroLimpo) resultados.push({ summary: erroLimpo });
+        const failureBlock = match[1];
+        const failureLinkRegex = /<a[^>]*href=["']#([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        let failureLinkMatch;
+        let encontrouAtalho = false;
+
+        while ((failureLinkMatch = failureLinkRegex.exec(failureBlock)) !== null) {
+            const erroLimpo = decodeHtmlEntities(
+                failureLinkMatch[2].replace(/<\/?[^>]+(>|$)/g, "")
+            ).trim();
+
+            if (erroLimpo) {
+                resultados.push({
+                    summary: erroLimpo,
+                    logAnchor: failureLinkMatch[1],
+                    requestOrigin: extractRequestOrigin(htmlString, failureLinkMatch[1])
+                });
+                encontrouAtalho = true;
+            }
+        }
+
+        if (!encontrouAtalho) {
+            const erroLimpo = decodeHtmlEntities(
+                failureBlock.replace(/<li[^>]*>/gi, "\n- ").replace(/<\/?[^>]+(>|$)/g, "")
+            ).trim();
+            if (erroLimpo) resultados.push({ summary: erroLimpo });
+        }
     }
 
     if (isInterrupted && resultados.length === 0) {
@@ -1861,7 +2127,7 @@ function analyzeFvpLogs(htmlString) {
 // -------------------------------------------------------------
 // VALIDADOR FINAL (COM ÍCONES SVG DE ALTO NÍVEL)
 // -------------------------------------------------------------
-function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, testPassed, errorAnalysis) {
+function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, testPassed) {
     
     let validacaoHtml = "";
     let validacaoInstHtml = "";
@@ -2019,19 +2285,32 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             </div>
         </div>` : ``;
 
-    const errorAnalysisPreviewHtml = errorAnalysis ? `
-        <div class="analysis-preview-card" style="margin-bottom: 16px; padding: 12px 14px; border: 1px solid rgba(130, 87, 229, 0.25); border-radius: 10px; background: rgba(130, 87, 229, 0.08);">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom: 8px;">
-                <strong style="color: var(--text-title);">🧠 Causa provável do erro</strong>
-                <button type="button" class="btn-view-log" onclick="window.showErrorAnalysis('${errorAnalysis.id}'); return false;">
-                    Ver análise completa
-                </button>
-            </div>
-            <p style="margin: 0; color: var(--text-base);">${escapeHtml(errorAnalysis.likelyCause)}</p>
-            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top: 8px; font-size: 0.78rem; color: var(--text-muted);">
-                <span>${errorAnalysis.jwtTokens.length ? `${errorAnalysis.jwtTokens.length} JWT detectado(s)` : 'Sem JWT detectado'}</span>
-                <span>${errorAnalysis.context ? 'Contexto extraído' : 'Sem contexto'}</span>
-            </div>
+    const failureSummaries = resultados.filter(result => result.summary && !result.sucesso);
+    const failureSummaryHtml = failureSummaries.length ? `
+        <div class="failure-summary-card">
+            <strong>Failure summary:</strong>
+            <ul>
+                ${failureSummaries.map(result => `
+                    <li>
+                        <span>${escapeHtml(result.summary).replace(/\n/g, '<br>')}</span>
+                        ${result.requestOrigin ? `
+                            <div class="failure-request-origin">
+                                <strong>Origem:</strong>
+                                <span class="http-method">${escapeHtml(result.requestOrigin.method)}</span>
+                                <code>${escapeHtml(result.requestOrigin.url)}</code>
+                                ${result.requestOrigin.status ? `<span class="http-status">${escapeHtml(result.requestOrigin.status)}</span>` : ''}
+                            </div>` : ''}
+                        ${result.logAnchor ? `
+                            <a class="failure-summary-link" href="${htmlBlobUrl}#${encodeURIComponent(result.logAnchor)}" target="_blank">
+                                Ir para o erro
+                            </a>` : ''}
+                        ${result.requestOrigin?.logAnchor ? `
+                            <a class="failure-summary-link endpoint-link" href="${htmlBlobUrl}#${encodeURIComponent(result.requestOrigin.logAnchor)}" target="_blank">
+                                Ir à origem no log
+                            </a>` : ''}
+                    </li>
+                `).join('')}
+            </ul>
         </div>` : '';
 
     let html = `
@@ -2052,7 +2331,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         ${validacaoInstHtml}
         ${resolutionHintHtml}
         ${validacaoHtml}
-        ${errorAnalysisPreviewHtml}
+        ${failureSummaryHtml}
 
         <div class="metadata-grid">
             <div class="metadata-item"><span>Auth. Server ID Oficial</span><strong>${meta.asId}</strong></div>
@@ -2063,6 +2342,9 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             ${meta.runCycle && meta.runCycle !== "Não encontrado" ? `<div class="metadata-item"><span>Ciclo</span><strong>${meta.runCycle}</strong></div>` : ``}
             ${meta.sdTicket && meta.sdTicket !== "Não encontrado" ? `<div class="metadata-item"><span>SD Ticket</span><strong>${meta.sdTicket}</strong></div>` : ``}
             <div class="metadata-item"><span>Alias da Execução</span><strong>${meta.alias}</strong></div>
+            ${meta.executionCreatedUtc ? `<div class="metadata-item"><span>Início da Execução — Brasília</span><strong>${meta.executionCreatedBrasilia}</strong></div>` : ``}
+            ${meta.exportedBrasilia !== "Não identificado" ? `<div class="metadata-item"><span>Exportação do Log — Brasília</span><strong>${meta.exportedBrasilia}</strong></div>` : ``}
+            ${meta.executionToExportDifference !== "Não calculada" ? `<div class="metadata-item"><span>Execução até Exportação</span><strong>${meta.executionToExportDifference}</strong></div>` : ``}
             ${meta.authServerIssuer && meta.authServerIssuer !== "Não encontrado" ? `<div class="metadata-item"><span>Endpoint Base Utilizado</span><strong>${meta.authServerIssuer}</strong></div>` : ""}
             <div class="metadata-item"><span>Dispositivo / Client</span><strong>${meta.device}</strong></div>
             ${meta.cnpj && meta.cnpj !== "Não encontrado" ? `<div class="metadata-item"><span>CNPJ Detectado</span><strong>${meta.cnpj}</strong></div>` : ""}
