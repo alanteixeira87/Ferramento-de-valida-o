@@ -40,6 +40,8 @@ if(logoutBtn) {
 }
 
 function setActiveView(activeView) {
+    if (activeView === 'state-dashboard') activeView = 'tests';
+
     [btnNavTests, btnNavStateDashboard, btnNavDocs, btnNavDailyReport].forEach(btn => btn?.classList.remove('active'));
     [viewTests, viewStateDashboard, viewDocs, viewDailyReport].forEach(view => view?.classList.remove('active'));
 
@@ -60,7 +62,6 @@ function setActiveView(activeView) {
 
 if(btnNavTests && btnNavDocs && viewTests && viewDocs) {
     btnNavTests.addEventListener('click', () => setActiveView('tests'));
-    btnNavStateDashboard?.addEventListener('click', () => setActiveView('state-dashboard'));
     btnNavDocs.addEventListener('click', () => setActiveView('docs'));
     btnNavDailyReport?.addEventListener('click', () => setActiveView('daily-report'));
 }
