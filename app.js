@@ -9,9 +9,13 @@ const mainApp = document.getElementById('mainApp');
 const logoutBtn = document.getElementById('logoutBtn');
 
 const btnNavTests = document.getElementById('btnNavTests');
+const btnNavStateDashboard = document.getElementById('btnNavStateDashboard');
 const btnNavDocs = document.getElementById('btnNavDocs');
+const btnNavDailyReport = document.getElementById('btnNavDailyReport');
 const viewTests = document.getElementById('viewTests');
+const viewStateDashboard = document.getElementById('viewStateDashboard');
 const viewDocs = document.getElementById('viewDocs');
+const viewDailyReport = document.getElementById('viewDailyReport');
 
 if(loginForm) {
     loginForm.addEventListener('submit', (e) => {
@@ -36,12 +40,18 @@ if(logoutBtn) {
 }
 
 function setActiveView(activeView) {
-    [btnNavTests, btnNavDocs].forEach(btn => btn?.classList.remove('active'));
-    [viewTests, viewDocs].forEach(view => view?.classList.remove('active'));
+    [btnNavTests, btnNavStateDashboard, btnNavDocs, btnNavDailyReport].forEach(btn => btn?.classList.remove('active'));
+    [viewTests, viewStateDashboard, viewDocs, viewDailyReport].forEach(view => view?.classList.remove('active'));
 
     if (activeView === 'tests') {
         btnNavTests?.classList.add('active');
         viewTests?.classList.add('active');
+    } else if (activeView === 'state-dashboard') {
+        btnNavStateDashboard?.classList.add('active');
+        viewStateDashboard?.classList.add('active');
+    } else if (activeView === 'daily-report') {
+        btnNavDailyReport?.classList.add('active'); viewDailyReport?.classList.add('active');
+        window.dispatchEvent(new CustomEvent('daily-report-opened'));
     } else if (activeView === 'docs') {
         btnNavDocs?.classList.add('active');
         viewDocs?.classList.add('active');
@@ -50,7 +60,9 @@ function setActiveView(activeView) {
 
 if(btnNavTests && btnNavDocs && viewTests && viewDocs) {
     btnNavTests.addEventListener('click', () => setActiveView('tests'));
+    btnNavStateDashboard?.addEventListener('click', () => setActiveView('state-dashboard'));
     btnNavDocs.addEventListener('click', () => setActiveView('docs'));
+    btnNavDailyReport?.addEventListener('click', () => setActiveView('daily-report'));
 }
 
 // -------------------------------------------------------------
@@ -277,6 +289,278 @@ const dbAsId = {
     "74f9cbfb-1016-4558-a78c-5a55814ce52a": { "nome": "Woop", "conglomerado": "0da3f6e5-a748-55d1-b39f-1653df146729" },
     "2ba35e89-a932-469f-85c5-4a0ba8b28304": { "nome": "ZEMA CFI S/A", "conglomerado": "e93badba-7da7-5cb8-8b85-88ddb2fb8bd7" }
 };
+
+const ISPB_BASE_STORAGE_KEY = 'fvp-brand-ispb-base-v1';
+let brandIspbBase = [];
+
+function loadStoredIspbBase() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(ISPB_BASE_STORAGE_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function normalizeLookupText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '');
+}
+
+function normalizeAsId(value) {
+    const text = String(value || '').trim().toLowerCase();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(text) ? text : '';
+}
+
+function normalizeIspb(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.length < 8 ? digits.padStart(8, '0') : digits;
+}
+
+function findColumnKey(row, candidates) {
+    const normalizedCandidates = candidates.map(normalizeLookupText);
+    return Object.keys(row || {}).find(key => {
+        const normalizedKey = normalizeLookupText(key);
+        return normalizedCandidates.some(candidate => normalizedKey === candidate || normalizedKey.includes(candidate));
+    });
+}
+
+function rowsToIspbBase(rows) {
+    const entries = [];
+
+    rows.forEach(row => {
+        const asIdKey = findColumnKey(row, ['as-id', 'asid', 'auth server id', 'authorisation server id']);
+        const brandKey = findColumnKey(row, ['marca', 'brand', 'instituicao', 'institution']);
+        const conglomerateKey = findColumnKey(row, ['conglomerado', 'conglomerate', 'grupo']);
+        const ispbKey = findColumnKey(row, ['ispb']);
+        const accountTypeKey = findColumnKey(row, ['tipo de conta', 'account type']);
+
+        const asId = normalizeAsId(row[asIdKey]);
+        const brand = String(row[brandKey] || '').trim();
+        const conglomerate = String(row[conglomerateKey] || '').trim();
+        const ispb = normalizeIspb(row[ispbKey]);
+        const accountType = String(row[accountTypeKey] || '').trim();
+
+        if (!ispb || (!asId && !brand && !conglomerate)) return;
+
+        entries.push({
+            asId,
+            brand,
+            conglomerate,
+            ispb,
+            accountType,
+            brandKey: normalizeLookupText(brand),
+            conglomerateKey: normalizeLookupText(conglomerate)
+        });
+    });
+
+    return entries;
+}
+
+function updateIspbBaseStatus() {
+    const status = document.getElementById('ispbBaseStatus');
+    if (!status) return;
+
+    if (brandIspbBase.length) {
+        const uniqueIspbs = new Set(brandIspbBase.map(item => item.ispb).filter(Boolean)).size;
+        status.textContent = `Base local carregada: ${brandIspbBase.length} vinculo(s), ${uniqueIspbs} ISPB(s) unico(s).`;
+    } else {
+        status.textContent = 'Base local de ISPB nao encontrada. A validacao seguira apenas com os dados do log.';
+    }
+}
+
+function initializeIspbBase() {
+    const customBase = loadStoredIspbBase();
+    if (customBase.length) {
+        brandIspbBase = customBase;
+    } else {
+        brandIspbBase = rowsToIspbBase(window.DEFAULT_ISPB_ROWS || []);
+    }
+    updateIspbBaseStatus();
+}
+
+async function handleIspbBaseUpload(file) {
+    if (!file) return;
+    const status = document.getElementById('ispbBaseStatus');
+
+    if (!window.XLSX) {
+        if (status) status.textContent = 'Biblioteca XLSX indisponivel. Verifique a conexao e tente novamente.';
+        return;
+    }
+
+    try {
+        if (status) status.textContent = `Lendo ${file.name}...`;
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const rows = workbook.SheetNames.flatMap(sheetName => {
+            const sheet = workbook.Sheets[sheetName];
+            return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        });
+
+        brandIspbBase = rowsToIspbBase(rows);
+        localStorage.setItem(ISPB_BASE_STORAGE_KEY, JSON.stringify(brandIspbBase));
+        updateIspbBaseStatus();
+    } catch (error) {
+        console.error('Falha ao carregar base ISPB:', error);
+        if (status) status.textContent = 'Nao foi possivel ler a planilha de ISPB.';
+    }
+}
+
+function findIspbCandidatesForBrand(meta, registeredBrand) {
+    if (!brandIspbBase.length) return [];
+
+    const asId = normalizeAsId(meta?.asId);
+    let candidates = asId ? brandIspbBase.filter(item => item.asId === asId) : [];
+    if (candidates.length) return candidates;
+
+    const names = [
+        registeredBrand?.nome,
+        meta?.institutionName,
+        meta?.alias
+    ].map(normalizeLookupText).filter(Boolean);
+
+    if (!names.length) return [];
+
+    return brandIspbBase.filter(item => {
+        return names.some(name =>
+            (item.brandKey && (item.brandKey.includes(name) || name.includes(item.brandKey))) ||
+            (item.conglomerateKey && (item.conglomerateKey.includes(name) || name.includes(item.conglomerateKey)))
+        );
+    });
+}
+
+function buildIspbValidation(meta, registeredBrand, icons) {
+    const userIspb = normalizeIspb(meta?.creditor?.creditorAccountIspb);
+
+    if (!userIspb) {
+        return {
+            passed: true,
+            html: `<div class="validation-box warning">${icons.warning}<div><strong>ISPB nao informado:</strong> o log nao trouxe o campo <b>creditorAccountIspb</b> para identificar a instituicao da conta usada no teste.</div></div>`
+        };
+    }
+
+    if (!brandIspbBase.length) {
+        return {
+            passed: true,
+            html: `<div class="validation-box warning">${icons.warning}<div><strong>Base ISPB indisponivel:</strong> a base local nao foi carregada para identificar a instituicao do ISPB <b>${escapeHtml(userIspb)}</b>.</div></div>`
+        };
+    }
+
+    const matches = brandIspbBase.filter(item => item.ispb === userIspb);
+    if (!matches.length) {
+        return {
+            passed: true,
+            html: `<div class="validation-box warning">${icons.warning}<div><strong>ISPB sem referencia:</strong> o ISPB <b>${escapeHtml(userIspb)}</b> nao foi localizado na base local de instituicoes.</div></div>`
+        };
+    }
+
+    const uniqueInstitutions = [];
+    const seen = new Set();
+    matches.forEach(item => {
+        const key = `${item.brand}|${item.conglomerate}|${item.accountType}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        uniqueInstitutions.push(item);
+    });
+
+    const institutionText = uniqueInstitutions
+        .slice(0, 6)
+        .map(item => {
+            const brand = item.brand || item.conglomerate || 'Instituicao nao informada';
+            const details = [
+                item.conglomerate && item.conglomerate !== brand ? `Conglomerado: ${item.conglomerate}` : '',
+                item.accountType ? `Tipo de conta: ${item.accountType}` : ''
+            ].filter(Boolean).join(' | ');
+            return `${brand}${details ? ` (${details})` : ''}`;
+        })
+        .join(' | ');
+    const extraCount = uniqueInstitutions.length > 6 ? ` + ${uniqueInstitutions.length - 6} outro(s) vinculo(s)` : '';
+
+    return {
+        passed: true,
+        html: `<div class="validation-box success">${icons.success}<div><strong>ISPB Identificado:</strong> o ISPB usado na conta (<b>${escapeHtml(userIspb)}</b>) pertence a <b>${escapeHtml(uniqueInstitutions[0].brand || uniqueInstitutions[0].conglomerate || 'instituicao localizada')}</b>.<br><span class="validation-detail">${escapeHtml(institutionText + extraCount)}</span></div></div>`
+    };
+}
+
+const ispbBaseInput = document.getElementById('ispbBaseInput');
+const ispbBaseBtn = document.getElementById('ispbBaseBtn');
+ispbBaseBtn?.addEventListener('click', () => ispbBaseInput?.click());
+ispbBaseInput?.addEventListener('change', event => handleIspbBaseUpload(event.target.files?.[0]));
+initializeIspbBase();
+
+const userAccountBase = (window.DEFAULT_USER_ACCOUNTS || []).map(account => ({
+    ...account,
+    userKey: normalizeLookupText(account.user),
+    segment: String(account.segment || '').toUpperCase(),
+    creditorAccountIspb: normalizeIspb(account.creditorAccountIspb),
+    creditorAccountIssuer: String(account.creditorAccountIssuer || '').replace(/\D/g, ''),
+    creditorAccountNumber: String(account.creditorAccountNumber || '').replace(/\D/g, ''),
+    creditorAccountAccountType: String(account.creditorAccountAccountType || '').trim().toUpperCase(),
+    creditorNameKey: normalizeLookupText(account.creditorName)
+}));
+
+function normalizeAccountFromLog(account = {}) {
+    return {
+        creditorAccountIspb: normalizeIspb(account.creditorAccountIspb),
+        creditorAccountIssuer: String(account.creditorAccountIssuer || '').replace(/\D/g, ''),
+        creditorAccountNumber: String(account.creditorAccountNumber || '').replace(/\D/g, ''),
+        creditorAccountAccountType: String(account.creditorAccountAccountType || '').trim().toUpperCase(),
+        creditorName: String(account.creditorName || '').trim(),
+        creditorNameKey: normalizeLookupText(account.creditorName)
+    };
+}
+
+function isSameAccount(a, b) {
+    return !!(
+        a.creditorAccountIspb &&
+        a.creditorAccountIssuer &&
+        a.creditorAccountNumber &&
+        a.creditorAccountAccountType &&
+        a.creditorAccountIspb === b.creditorAccountIspb &&
+        a.creditorAccountIssuer === b.creditorAccountIssuer &&
+        a.creditorAccountNumber === b.creditorAccountNumber &&
+        a.creditorAccountAccountType === b.creditorAccountAccountType
+    );
+}
+
+function formatAccountSummary(account) {
+    return `${account.creditorAccountIspb || '-'} / ag. ${account.creditorAccountIssuer || '-'} / conta ${account.creditorAccountNumber || '-'} / ${account.creditorAccountAccountType || '-'}`;
+}
+
+function buildUserAccountValidation(meta, icons) {
+    if (!userAccountBase.length) {
+        return {
+            passed: true,
+            html: `<div class="validation-box warning">${icons.warning}<div><strong>Base de contas indisponivel:</strong> nao foi possivel carregar a base local de usuarios e contas.</div></div>`
+        };
+    }
+
+    const logAccount = normalizeAccountFromLog(meta?.creditor);
+    if (!logAccount.creditorAccountIspb || !logAccount.creditorAccountIssuer || !logAccount.creditorAccountNumber || !logAccount.creditorAccountAccountType) {
+        return {
+            passed: true,
+            html: `<div class="validation-box warning">${icons.warning}<div><strong>Conta nao informada:</strong> o log nao trouxe todos os campos da conta para validar contra a base de usuarios.</div></div>`
+        };
+    }
+
+    const exactBaseMatch = userAccountBase.find(account => isSameAccount(account, logAccount));
+
+    if (exactBaseMatch) {
+        return {
+            passed: true,
+            html: `<div class="validation-box success">${icons.success}<div><strong>Conta Validada:</strong> a conta informada pertence a <b>${escapeHtml(exactBaseMatch.user)}</b> (${escapeHtml(exactBaseMatch.segment)}), conforme a base local de usuarios.<br><span class="validation-detail">${escapeHtml(formatAccountSummary(exactBaseMatch))}${exactBaseMatch.creditorName ? ` | ${escapeHtml(exactBaseMatch.creditorName)}` : ''}${exactBaseMatch.note ? ` | Obs.: ${escapeHtml(exactBaseMatch.note)}` : ''}</span></div></div>`
+        };
+    }
+
+    return {
+        passed: false,
+        html: `<div class="validation-box error">${icons.error}<div><strong>Conta nao cadastrada:</strong> a conta informada (<b>${escapeHtml(formatAccountSummary(logAccount))}</b>) nao foi localizada na base local de usuarios.</div></div>`
+    };
+}
 
 // -------------------------------------------------------------
 // ESTADO GLOBAL & DASHBOARD INTERATIVO
@@ -2143,6 +2427,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     const iconSuccess = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
     const iconError = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
     const iconWarning = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-warning)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>`;
+    const validationIcons = { success: iconSuccess, error: iconError, warning: iconWarning };
 
     const safeAlias = meta.alias && meta.alias !== "Não encontrado" ? meta.alias.toLowerCase() : "";
     const safeFileName = fileName ? fileName.toLowerCase() : "";
@@ -2269,6 +2554,11 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         if (!resolvedIsPF) testPassed = false;
     }
 
+    const ispbValidation = buildIspbValidation(meta, transmissoraEncontrada, validationIcons);
+    const userAccountValidation = buildUserAccountValidation(meta, validationIcons);
+    if (!ispbValidation.passed) testPassed = false;
+    if (!userAccountValidation.passed) testPassed = false;
+
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
     const dataStatus = testPassed ? 'passed' : 'failed';
 
@@ -2329,6 +2619,8 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         </h3>
         
         ${validacaoInstHtml}
+        ${ispbValidation.html}
+        ${userAccountValidation.html}
         ${resolutionHintHtml}
         ${validacaoHtml}
         ${failureSummaryHtml}
@@ -2401,3 +2693,363 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     html += `</div>`;
     return { html, isPassed: testPassed };
 }
+
+// -------------------------------------------------------------
+// DASHBOARD EM LOTE: NOKS DE STATE E SESSAO DESLOGADA
+// -------------------------------------------------------------
+const stateDashboardData = {
+    processed: 0,
+    parseErrors: 0,
+    executors: new Map(),
+    occurrences: []
+};
+
+const stateDropZone = document.getElementById('stateDropZone');
+const stateFileInput = document.getElementById('stateFileInput');
+const stateUploadBtn = document.getElementById('stateUploadBtn');
+const stateProcessingStatus = document.getElementById('stateProcessingStatus');
+const stateProgressBar = document.getElementById('stateProgressBar');
+const stateProgressText = document.getElementById('stateProgressText');
+const stateExecutorFilter = document.getElementById('stateExecutorFilter');
+let stateDashboardProcessing = false;
+
+function normalizedMissingValue(value) {
+    return !value || /^n(?:a|ã)o (?:encontrado|identificado)$/i.test(String(value).trim());
+}
+
+function extractExecutorName(htmlString) {
+    const decoded = decodeHtmlEntities(htmlString);
+    const labels = [
+        'Executor', 'Executor Name', 'ExecutorName', 'executedBy',
+        'Executed By', 'Execution User', 'executionUser', 'username'
+    ];
+
+    for (const label of labels) {
+        const safeLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const tableMatch = decoded.match(new RegExp(
+            `<(?:td|th)[^>]*>\\s*${safeLabel}\\s*<\\/(?:td|th)>[\\s\\S]{0,500}?<(?:pre|span)[^>]*>\\s*([^<]{1,160})`,
+            'i'
+        ));
+        if (tableMatch && tableMatch[1].trim()) return stripHtmlTags(tableMatch[1]);
+
+        const jsonMatch = decoded.match(new RegExp(
+            `["']?${safeLabel}["']?\\s*[:=]\\s*(?:"([^"]{1,160})"|'([^']{1,160})')`,
+            'i'
+        ));
+        if (jsonMatch) return stripHtmlTags(jsonMatch[1] || jsonMatch[2]);
+    }
+
+    return 'Executor não identificado';
+}
+
+function classifyOperationalNok(htmlString, resultados, metadata, fileName) {
+    const summaries = resultados
+        .filter(item => item.summary && !item.sucesso)
+        .map(item => stripHtmlTags(item.summary));
+    const logItems = extractLogItems(htmlString);
+    const errorItems = logItems
+        .filter(isErrorLogItem)
+        .map(item => stripHtmlTags(`${item.message} ${item.details.map(detail => `${detail.key}: ${detail.value}`).join(' ')}`));
+    const candidates = [...new Set([...summaries, ...errorItems].filter(Boolean))];
+    const combined = candidates.join(' \n ');
+
+    const logoutPattern = /(?:user|usu[aá]rio|session|sess[aã]o).{0,80}(?:logged[\s_-]*out|log(?:ged)?[\s_-]*off|deslogad[oa]|not[\s_-]*logged|n[aã]o\s+(?:est[aá]\s+)?logad[oa]|sess[aã]o\s+(?:expirada|encerrada)|unauthenticated)|(?:logged[\s_-]*out|deslogad[oa]).{0,80}(?:user|usu[aá]rio|session|sess[aã]o)/i;
+    const statePattern = /(?:invalid|incorrect|wrong|missing|mismatch|unexpected|expired|ausente|inv[aá]lid[oa]|incorret[oa]|divergente|expirad[oa]|n[aã]o\s+(?:confere|corresponde|encontrad[oa]))[\s_-]*(?:oauth[\s_-]*)?state\b|\b(?:oauth[\s_-]*)?state\b.{0,120}(?:invalid|incorrect|wrong|missing|mismatch|unexpected|expired|does\s+not\s+match|doesn't\s+match|failed\s+(?:the\s+)?validation|ausente|inv[aá]lid[oa]|incorret[oa]|divergente|expirad[oa]|n[aã]o\s+(?:confere|corresponde|encontrad[oa]))/i;
+    const rules = [
+        {
+            category: 'Usuário ou sessão deslogada', level: 'confirmed', kind: 'logout',
+            pattern: logoutPattern
+        },
+        {
+            category: 'Parâmetro state ausente ou inválido', level: 'confirmed', kind: 'state',
+            pattern: statePattern
+        },
+        {
+            category: 'Parâmetros do plano inválidos', level: 'confirmed', kind: 'parameter',
+            pattern: /(?:invalid|incorrect|missing|wrong|inv[aá]lid[oa]|incorret[oa]|ausente).{0,80}(?:test\s*parameter|plan\s*parameter|alias|org\s*id|authori[sz]ation\s*server\s*id|brazil\s*cpf|brazil\s*cnpj|debtor\s*account|creditor\s*account)|(?:alias|org\s*id|authori[sz]ation\s*server\s*id|brazil\s*cpf|brazil\s*cnpj|debtor\s*account|creditor\s*account).{0,80}(?:invalid|incorrect|missing|wrong|inv[aá]lid[oa]|incorret[oa]|ausente)/i
+        },
+        {
+            category: 'Saldo insuficiente', level: 'confirmed', kind: 'balance',
+            pattern: /insufficient[\s_-]*(?:funds|balance)|saldo\s+insuficiente|sem\s+saldo|not\s+enough\s+(?:funds|balance)/i
+        },
+        {
+            category: 'Interrupção manual da execução', level: 'confirmed', kind: 'interruption',
+            pattern: /requested\s+to\s+stop|stopped\s+by\s+(?:the\s+)?user|manual(?:ly)?\s+(?:stopped|interrupted)|interrompid[oa]\s+manualmente|bot[aã]o\s+stop/i
+        },
+        {
+            category: 'Evidência obrigatória ausente', level: 'confirmed', kind: 'evidence',
+            pattern: /(?:missing|absent|ausente|n[aã]o\s+anexad[oa]).{0,60}(?:evidence|attachment|screenshot|log|evid[eê]ncia|anexo|print)|(?:evidence|attachment|screenshot|evid[eê]ncia|anexo|print).{0,60}(?:missing|absent|ausente|n[aã]o\s+anexad[oa])/i
+        },
+        {
+            category: 'Configuração do Diretório ou endpoint', level: 'confirmed', kind: 'configuration',
+            pattern: /consents?\s+api.{0,100}(?:uri|url).{0,40}(?:not\s+provided|missing|ausente)|(?:uri|url).{0,60}consents?\s+api.{0,60}(?:not\s+provided|missing|ausente)|(?:endpoint|api).{0,60}(?:not\s+registered|n[aã]o\s+cadastrad[oa]).{0,40}(?:directory|diret[oó]rio)/i
+        },
+        {
+            category: 'Client de execução futura removido', level: 'confirmed', kind: 'client',
+            pattern: /client.{0,80}(?:deleted|removed|modified|exclu[ií]d[oa]|removid[oa]|alterad[oa]).{0,100}(?:scheduled|long[\s_-]*duration|future|agendad[oa]|longa\s+dura[cç][aã]o)|(?:scheduled|long[\s_-]*duration|future|agendad[oa]|longa\s+dura[cç][aã]o).{0,100}client.{0,80}(?:deleted|removed|modified|exclu[ií]d[oa]|removid[oa]|alterad[oa])/i
+        },
+        {
+            category: 'Massa, conta, produto ou limite inadequado', level: 'probable', kind: 'test-data',
+            pattern: /(?:account|conta|product|produto|limit|limite|al[cç]ada|test\s*data|massa).{0,100}(?:not\s+eligible|not\s+supported|unavailable|incorrect|invalid|incompat[ií]vel|indispon[ií]vel|incorret[oa]|inv[aá]lid[oa]|sem\s+acesso)/i
+        },
+        {
+            category: 'Execução fora da janela esperada', level: 'probable', kind: 'execution-window',
+            pattern: /(?:outside|out\s+of).{0,50}(?:execution|business|scheduled).{0,30}(?:window|time)|fora.{0,30}(?:janela|hor[aá]rio).{0,40}(?:execu[cç][aã]o|agendad[oa])|(?:too\s+early|too\s+late).{0,60}(?:scheduled|payment|execution)/i
+        },
+        {
+            category: 'Execução interrompida sem causa manual comprovada', level: 'probable', kind: 'interruption',
+            pattern: /test\s+was\s+interrupted\s+before\s+it\s+could\s+complete|status\s*[:=]\s*interrupted|result\s*[:=]\s*interrupted/i
+        },
+        {
+            category: 'Sessão da FVP expirada', level: 'external', kind: 'fvp-session',
+            pattern: /failed\s+to\s+fetch|fvp.{0,60}(?:session|sess[aã]o).{0,40}(?:timeout|expired|expirad[oa])/i
+        },
+        {
+            category: 'Falha externa do Diretório', level: 'external', kind: 'directory',
+            pattern: /(?:directory|diret[oó]rio).{0,120}(?:50\d|internal\s+server\s+error|service\s+unavailable|gateway\s+timeout)|(?:50\d|internal\s+server\s+error|service\s+unavailable|gateway\s+timeout).{0,120}(?:directory|diret[oó]rio)/i
+        }
+    ];
+
+    const occurrences = [];
+    rules.forEach(rule => {
+        const message = candidates.find(candidate => rule.pattern.test(candidate));
+        if (message) occurrences.push({ ...rule, message });
+    });
+    if (occurrences.some(item => item.category === 'Interrupção manual da execução')) {
+        const genericInterruptionIndex = occurrences.findIndex(item =>
+            item.category === 'Execução interrompida sem causa manual comprovada'
+        );
+        if (genericInterruptionIndex >= 0) occurrences.splice(genericInterruptionIndex, 1);
+    }
+
+    const declaredSegment = detectTestSegment(`${fileName} ${metadata?.testName || ''}`, metadata?.alias);
+    const actualCnpj = metadata?.cnpj && !normalizedMissingValue(metadata.cnpj);
+    if (declaredSegment.hasConflict) {
+        occurrences.push({
+            category: 'Segmento PF/PJ conflitante no plano',
+            level: 'probable',
+            kind: 'segment',
+            message: 'O nome, alias ou identificação do teste contém evidências simultâneas de PF e PJ.'
+        });
+    }
+    if (declaredSegment.isPF && actualCnpj) {
+        occurrences.push({
+            category: 'Possível divergência de segmento PF/PJ',
+            level: 'probable',
+            kind: 'segment',
+            message: `Execução identificada como PF, mas o log contém BrazilCnpj/CNPJ (${metadata.cnpj}). Validar se a massa ou o plano utilizado era PJ.`
+        });
+    }
+    if (declaredSegment.isPJ && !actualCnpj) {
+        occurrences.push({
+            category: 'Parâmetro PJ possivelmente ausente',
+            level: 'probable',
+            kind: 'segment',
+            message: 'Execução identificada como PJ sem BrazilCnpj/CNPJ claramente extraído do log.'
+        });
+    }
+
+    if (!occurrences.length) {
+        occurrences.push({
+            category: 'Possível falha funcional da instituição',
+            level: 'functional',
+            kind: 'functional',
+            message: truncateText(summaries[0] || combined || 'NOK sem causa operacional reconhecida.', 420)
+        });
+    }
+
+    return {
+        occurrences,
+        hasStateError: occurrences.some(item => item.kind === 'state'),
+        hasLoggedOutError: occurrences.some(item => item.kind === 'logout'),
+        hasConfirmed: occurrences.some(item => item.level === 'confirmed'),
+        hasProbable: occurrences.some(item => item.level === 'probable'),
+        hasOperational: occurrences.some(item => item.level === 'confirmed' || item.level === 'probable')
+    };
+}
+
+function getExecutorStats(executor) {
+    if (!stateDashboardData.executors.has(executor)) {
+        stateDashboardData.executors.set(executor, {
+            executor, processed: 0, operationalNoks: 0, confirmed: 0, probable: 0,
+            external: 0, functional: 0, stateErrors: 0, loggedOutErrors: 0
+        });
+    }
+    return stateDashboardData.executors.get(executor);
+}
+
+function renderStateDashboard() {
+    const executorRows = [...stateDashboardData.executors.values()];
+    const totalState = executorRows.reduce((sum, item) => sum + item.stateErrors, 0);
+    const totalLoggedOut = executorRows.reduce((sum, item) => sum + item.loggedOutErrors, 0);
+    const totalConfirmed = executorRows.reduce((sum, item) => sum + item.confirmed, 0);
+    const totalProbable = executorRows.reduce((sum, item) => sum + item.probable, 0);
+    const totalExternal = executorRows.reduce((sum, item) => sum + item.external, 0);
+    const totalOperational = executorRows.reduce((sum, item) => sum + item.operationalNoks, 0);
+    const rate = stateDashboardData.processed ? totalOperational / stateDashboardData.processed * 100 : 0;
+
+    document.getElementById('stateTotalProcessed').textContent = stateDashboardData.processed;
+    document.getElementById('stateConfirmedCount').textContent = totalConfirmed;
+    document.getElementById('stateProbableCount').textContent = totalProbable;
+    document.getElementById('stateErrorCount').textContent = `${totalState} / ${totalLoggedOut}`;
+    document.getElementById('stateExternalCount').textContent = totalExternal;
+    document.getElementById('stateErrorRate').textContent = `${rate.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+
+    const filter = (stateExecutorFilter?.value || '').trim().toLocaleLowerCase('pt-BR');
+    const visibleRows = executorRows
+        .filter(item => item.executor.toLocaleLowerCase('pt-BR').includes(filter))
+        .sort((a, b) => b.operationalNoks - a.operationalNoks || a.executor.localeCompare(b.executor, 'pt-BR'));
+
+    document.getElementById('stateExecutorTableBody').innerHTML = visibleRows.length
+        ? visibleRows.map(item => {
+            const average = item.operationalNoks ? (item.confirmed + item.probable) / item.operationalNoks : 0;
+            const executorRate = item.processed ? item.operationalNoks / item.processed * 100 : 0;
+            return `<tr>
+                <td><strong>${escapeHtml(item.executor)}</strong></td>
+                <td>${item.processed}</td>
+                <td>${item.operationalNoks}</td>
+                <td>${item.confirmed}</td>
+                <td>${item.probable}</td>
+                <td>${item.stateErrors}</td>
+                <td>${item.loggedOutErrors}</td>
+                <td>${average.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td>${executorRate.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td>
+            </tr>`;
+        }).join('')
+        : '<tr><td colspan="9" class="state-empty-cell">Nenhum executor encontrado.</td></tr>';
+
+    const recentOccurrences = stateDashboardData.occurrences.slice(-500).reverse();
+    document.getElementById('stateOccurrenceTableBody').innerHTML = recentOccurrences.length
+        ? recentOccurrences.map(item => `<tr>
+            <td><strong>${escapeHtml(item.fileName)}</strong>${item.testName ? `<br><small>${escapeHtml(item.testName)}</small>` : ''}</td>
+            <td>${escapeHtml(item.executor)}</td>
+            <td><span class="state-type-badge ${item.level}">${escapeHtml(item.levelLabel)}</span></td>
+            <td>${escapeHtml(item.category)}</td>
+            <td>${escapeHtml(item.summary)}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="5" class="state-empty-cell">Nenhuma ocorrência relevante encontrada.</td></tr>';
+}
+
+async function processStateDashboardFiles(fileList) {
+    const files = [...fileList].filter(file => file.name.toLowerCase().endsWith('.zip'));
+    if (!files.length || stateDashboardProcessing) return;
+
+    stateDashboardProcessing = true;
+    stateProcessingStatus.hidden = false;
+    stateUploadBtn.disabled = true;
+
+    for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        const percent = Math.round(index / files.length * 100);
+        stateProgressBar.style.width = `${percent}%`;
+        stateProgressText.textContent = `Processando ${index + 1} de ${files.length}: ${file.name}`;
+
+        try {
+            const zip = await JSZip.loadAsync(file);
+            const htmlFileName = Object.keys(zip.files).find(name =>
+                name.toLowerCase().endsWith('.html') && !name.includes('__MACOSX')
+            );
+            if (!htmlFileName) throw new Error('HTML principal não encontrado');
+
+            const htmlContent = await zip.file(htmlFileName).async('string');
+            const analysis = analyzeFvpLogs(htmlContent);
+            const executor = extractExecutorName(htmlContent);
+            const executorStats = getExecutorStats(executor);
+            const isEmptyLog = stripHtmlTags(htmlContent).length < 80;
+            const isNok = isEmptyLog || !analysis.resultados[0]?.sucesso;
+
+            stateDashboardData.processed++;
+            executorStats.processed++;
+
+            if (isNok) {
+                const classification = isEmptyLog
+                    ? {
+                        hasOperational: true,
+                        hasStateError: false,
+                        hasLoggedOutError: false,
+                        occurrences: [{
+                            category: 'Log vazio ou evidência coletada fora do prazo',
+                            level: 'confirmed',
+                            kind: 'evidence',
+                            message: 'O HTML exportado não contém conteúdo suficiente para auditar a execução.'
+                        }]
+                    }
+                    : classifyOperationalNok(
+                        htmlContent,
+                        analysis.resultados,
+                        analysis.metadata,
+                        file.name
+                    );
+                if (classification.hasOperational) executorStats.operationalNoks++;
+                if (classification.hasStateError) executorStats.stateErrors++;
+                if (classification.hasLoggedOutError) executorStats.loggedOutErrors++;
+
+                const levelLabels = {
+                    confirmed: 'Operacional confirmado',
+                    probable: 'Operacional provável',
+                    external: 'Técnico / externo',
+                    functional: 'Possível funcional'
+                };
+
+                classification.occurrences.forEach(occurrence => {
+                    if (occurrence.level === 'confirmed') executorStats.confirmed++;
+                    else if (occurrence.level === 'probable') executorStats.probable++;
+                    else if (occurrence.level === 'external') executorStats.external++;
+                    else executorStats.functional++;
+
+                    stateDashboardData.occurrences.push({
+                        fileName: file.name,
+                        testName: normalizedMissingValue(analysis.metadata.testName) ? '' : analysis.metadata.testName,
+                        executor,
+                        level: occurrence.level,
+                        levelLabel: levelLabels[occurrence.level],
+                        category: occurrence.category,
+                        summary: truncateText(occurrence.message, 420)
+                    });
+                });
+            }
+        } catch (error) {
+            stateDashboardData.parseErrors++;
+            console.error(`Falha no dashboard de state (${file.name}):`, error);
+        }
+
+        if ((index + 1) % 20 === 0) {
+            renderStateDashboard();
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    }
+
+    stateProgressBar.style.width = '100%';
+    stateProgressText.textContent = `${files.length} arquivo(s) concluído(s)${stateDashboardData.parseErrors ? ` — ${stateDashboardData.parseErrors} com erro de leitura` : ''}.`;
+    stateUploadBtn.disabled = false;
+    stateDashboardProcessing = false;
+    stateFileInput.value = '';
+    renderStateDashboard();
+}
+
+stateUploadBtn?.addEventListener('click', () => stateFileInput.click());
+stateFileInput?.addEventListener('change', event => processStateDashboardFiles(event.target.files));
+stateExecutorFilter?.addEventListener('input', renderStateDashboard);
+
+if (stateDropZone) {
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(name => {
+        stateDropZone.addEventListener(name, event => {
+            event.preventDefault();
+            event.stopPropagation();
+        });
+    });
+    ['dragenter', 'dragover'].forEach(name => stateDropZone.addEventListener(name, () => stateDropZone.classList.add('drag-active')));
+    ['dragleave', 'drop'].forEach(name => stateDropZone.addEventListener(name, () => stateDropZone.classList.remove('drag-active')));
+    stateDropZone.addEventListener('drop', event => processStateDashboardFiles(event.dataTransfer.files));
+}
+
+document.getElementById('clearStateDashboardBtn')?.addEventListener('click', () => {
+    if (stateDashboardProcessing) return;
+    stateDashboardData.processed = 0;
+    stateDashboardData.parseErrors = 0;
+    stateDashboardData.executors.clear();
+    stateDashboardData.occurrences.length = 0;
+    stateProcessingStatus.hidden = true;
+    stateProgressBar.style.width = '0';
+    renderStateDashboard();
+});

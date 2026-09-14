@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="daily-report.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
@@ -69,6 +70,14 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
                     Realizar testes
                 </button>
+                <button id="btnNavStateDashboard" class="nav-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M7 16l4-5 4 3 5-7"></path></svg>
+                    Falhas operacionais
+                </button>
+                <button id="btnNavDailyReport" class="nav-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></svg>
+                    Relatório Diário
+                </button>
                 <button id="btnNavDocs" class="nav-btn">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
                     Documentação
@@ -88,6 +97,14 @@
                 </header>
 
                 <section class="upload-section">
+                    <div class="ispb-upload-card">
+                        <div>
+                            <strong>Base de marcas e ISPB</strong>
+                            <span id="ispbBaseStatus">Base local de ISPB pronta para validacao automatica.</span>
+                        </div>
+                        <input type="file" id="ispbBaseInput" accept=".xlsx,.xls,.csv" style="display: none;">
+                        <button id="ispbBaseBtn" class="btn-outline" type="button">Substituir base ISPB</button>
+                    </div>
                     <div class="drop-zone" id="dropZone">
                         <div class="drop-zone-content">
                             <span style="font-size: 2.5rem; margin-bottom: 12px; display: block;">📂</span>
@@ -116,6 +133,81 @@
                         <div class="empty-state">
                             <p>Nenhum log processado ainda. Aguardando envio...</p>
                         </div>
+                    </div>
+                </section>
+            </div>
+
+            <div id="viewStateDashboard" class="view-section">
+                <header class="topbar state-dashboard-header">
+                    <div>
+                        <h2>Dashboard de falhas operacionais</h2>
+                        <p>Consolide NOKs operacionais, prováveis falhas de execução e ocorrências não operacionais por executor.</p>
+                    </div>
+                    <button id="clearStateDashboardBtn" class="btn-outline danger-outline">Limpar dashboard</button>
+                </header>
+
+                <section class="state-upload-card">
+                    <div id="stateDropZone" class="state-drop-zone">
+                        <div>
+                            <strong>Carregar lote de testes</strong>
+                            <span>Arraste os ZIPs ou selecione todos de uma vez. O lote será classificado pelas regras operacionais da FVP.</span>
+                        </div>
+                        <input type="file" id="stateFileInput" accept=".zip" multiple style="display:none;">
+                        <button id="stateUploadBtn" class="btn-primary">Selecionar arquivos</button>
+                    </div>
+                    <div id="stateProcessingStatus" class="state-processing-status" hidden>
+                        <div class="state-progress-track"><span id="stateProgressBar"></span></div>
+                        <span id="stateProgressText">Preparando arquivos...</span>
+                    </div>
+                </section>
+
+                <section class="state-kpi-grid">
+                    <article class="state-kpi"><span>Testes processados</span><strong id="stateTotalProcessed">0</strong></article>
+                    <article class="state-kpi danger"><span>Operacionais confirmados</span><strong id="stateConfirmedCount">0</strong></article>
+                    <article class="state-kpi warning"><span>Operacionais prováveis</span><strong id="stateProbableCount">0</strong></article>
+                    <article class="state-kpi"><span>State / deslogado</span><strong id="stateErrorCount">0 / 0</strong></article>
+                    <article class="state-kpi neutral"><span>Técnicos / externos</span><strong id="stateExternalCount">0</strong></article>
+                    <article class="state-kpi"><span>Taxa operacional</span><strong id="stateErrorRate">0,0%</strong></article>
+                </section>
+
+                <section class="state-panel">
+                    <div class="state-panel-heading">
+                        <div>
+                            <h3>Métricas por executor</h3>
+                            <p>A média considera ocorrências operacionais confirmadas e prováveis por NOK operacional.</p>
+                        </div>
+                        <input id="stateExecutorFilter" class="state-filter-input" type="search" placeholder="Filtrar executor...">
+                    </div>
+                    <div class="state-table-wrap">
+                        <table class="state-table">
+                            <thead><tr><th>Executor</th><th>Testes</th><th>NOKs operacionais</th><th>Confirmados</th><th>Prováveis</th><th>State</th><th>Deslogado</th><th>Média / NOK</th><th>Taxa</th></tr></thead>
+                            <tbody id="stateExecutorTableBody">
+                                <tr><td colspan="9" class="state-empty-cell">Nenhum lote processado.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="state-panel">
+                    <div class="state-panel-heading">
+                        <div>
+                            <h3>Ocorrências encontradas</h3>
+                            <p>Cada ocorrência informa a classe e o nível de atribuição encontrados no log.</p>
+                        </div>
+                        <div class="state-legend">
+                            <span class="state-type-badge confirmed">Confirmado</span>
+                            <span class="state-type-badge probable">Provável</span>
+                            <span class="state-type-badge external">Técnico / externo</span>
+                            <span class="state-type-badge functional">Possível funcional</span>
+                        </div>
+                    </div>
+                    <div class="state-table-wrap">
+                        <table class="state-table state-detail-table">
+                            <thead><tr><th>Arquivo / teste</th><th>Executor</th><th>Classificação</th><th>Categoria</th><th>Resumo do erro</th></tr></thead>
+                            <tbody id="stateOccurrenceTableBody">
+                                <tr><td colspan="5" class="state-empty-cell">Nenhuma ocorrência relevante encontrada.</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </section>
             </div>
@@ -196,9 +288,15 @@
                 </div>
             </div>
 
+            <div id="viewDailyReport" class="view-section daily-report-view"><div id="dailyReportRoot"></div></div>
         </main>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="ispb-base.js"></script>
+    <script src="user-accounts.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="app.js"></script>
+    <script src="daily-report.js"></script>
 </body>
 </html>
