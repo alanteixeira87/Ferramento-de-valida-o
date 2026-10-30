@@ -2496,19 +2496,6 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
     const dataStatus = testPassed ? 'passed' : 'failed';
 
-    const creditorCardHtml = meta.hasCreditorData ? `
-        <div class="data-card">
-            <h4>Dados do Credor</h4>
-            <div class="data-card-grid">
-                <div class="data-card-item"><span>Creditor ISPB</span><strong>${meta.creditor.creditorAccountIspb}</strong></div>
-                <div class="data-card-item"><span>Creditor Issuer</span><strong>${meta.creditor.creditorAccountIssuer}</strong></div>
-                <div class="data-card-item"><span>Número da Conta</span><strong>${meta.creditor.creditorAccountNumber}</strong></div>
-                <div class="data-card-item"><span>Tipo de Conta</span><strong>${meta.creditor.creditorAccountAccountType}</strong></div>
-                <div class="data-card-item"><span>Nome do Credor</span><strong>${meta.creditor.creditorName}</strong></div>
-                <div class="data-card-item"><span>CPF / CNPJ do Credor</span><strong>${meta.creditor.creditorCpfCnpj}</strong></div>
-            </div>
-        </div>` : ``;
-
     const failureSummaries = resultados.filter(result => result.summary && !result.sucesso);
     const failureSummaryHtml = failureSummaries.length ? `
         <div class="failure-summary-card">
@@ -2607,7 +2594,6 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             <div class="metadata-item"><span>Dispositivo / Client</span><strong>${meta.device}</strong></div>
             ${meta.cnpj && meta.cnpj !== "Não encontrado" ? `<div class="metadata-item"><span>CNPJ Detectado</span><strong>${meta.cnpj}</strong></div>` : ""}
         </div>
-        ${creditorCardHtml}
         ` : ``}
     `;
 
