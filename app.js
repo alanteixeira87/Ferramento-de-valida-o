@@ -494,76 +494,6 @@ ispbBaseBtn?.addEventListener('click', () => ispbBaseInput?.click());
 ispbBaseInput?.addEventListener('change', event => handleIspbBaseUpload(event.target.files?.[0]));
 initializeIspbBase();
 
-const userAccountBase = (window.DEFAULT_USER_ACCOUNTS || []).map(account => ({
-    ...account,
-    userKey: normalizeLookupText(account.user),
-    segment: String(account.segment || '').toUpperCase(),
-    creditorAccountIspb: normalizeIspb(account.creditorAccountIspb),
-    creditorAccountIssuer: String(account.creditorAccountIssuer || '').replace(/\D/g, ''),
-    creditorAccountNumber: String(account.creditorAccountNumber || '').replace(/\D/g, ''),
-    creditorAccountAccountType: String(account.creditorAccountAccountType || '').trim().toUpperCase(),
-    creditorNameKey: normalizeLookupText(account.creditorName)
-}));
-
-function normalizeAccountFromLog(account = {}) {
-    return {
-        creditorAccountIspb: normalizeIspb(account.creditorAccountIspb),
-        creditorAccountIssuer: String(account.creditorAccountIssuer || '').replace(/\D/g, ''),
-        creditorAccountNumber: String(account.creditorAccountNumber || '').replace(/\D/g, ''),
-        creditorAccountAccountType: String(account.creditorAccountAccountType || '').trim().toUpperCase(),
-        creditorName: String(account.creditorName || '').trim(),
-        creditorNameKey: normalizeLookupText(account.creditorName)
-    };
-}
-
-function isSameAccount(a, b) {
-    return !!(
-        a.creditorAccountIspb &&
-        a.creditorAccountIssuer &&
-        a.creditorAccountNumber &&
-        a.creditorAccountAccountType &&
-        a.creditorAccountIspb === b.creditorAccountIspb &&
-        a.creditorAccountIssuer === b.creditorAccountIssuer &&
-        a.creditorAccountNumber === b.creditorAccountNumber &&
-        a.creditorAccountAccountType === b.creditorAccountAccountType
-    );
-}
-
-function formatAccountSummary(account) {
-    return `${account.creditorAccountIspb || '-'} / ag. ${account.creditorAccountIssuer || '-'} / conta ${account.creditorAccountNumber || '-'} / ${account.creditorAccountAccountType || '-'}`;
-}
-
-function buildUserAccountValidation(meta, icons) {
-    if (!userAccountBase.length) {
-        return {
-            passed: true,
-            html: `<div class="validation-box warning">${icons.warning}<div><strong>Base de contas indisponivel:</strong> nao foi possivel carregar a base local de usuarios e contas.</div></div>`
-        };
-    }
-
-    const logAccount = normalizeAccountFromLog(meta?.creditor);
-    if (!logAccount.creditorAccountIspb || !logAccount.creditorAccountIssuer || !logAccount.creditorAccountNumber || !logAccount.creditorAccountAccountType) {
-        return {
-            passed: true,
-            html: `<div class="validation-box warning">${icons.warning}<div><strong>Conta nao informada:</strong> o log nao trouxe todos os campos da conta para validar contra a base de usuarios.</div></div>`
-        };
-    }
-
-    const exactBaseMatch = userAccountBase.find(account => isSameAccount(account, logAccount));
-
-    if (exactBaseMatch) {
-        return {
-            passed: true,
-            html: `<div class="validation-box success">${icons.success}<div><strong>Conta Validada:</strong> a conta informada pertence a <b>${escapeHtml(exactBaseMatch.user)}</b> (${escapeHtml(exactBaseMatch.segment)}), conforme a base local de usuarios.<br><span class="validation-detail">${escapeHtml(formatAccountSummary(exactBaseMatch))}${exactBaseMatch.creditorName ? ` | ${escapeHtml(exactBaseMatch.creditorName)}` : ''}${exactBaseMatch.note ? ` | Obs.: ${escapeHtml(exactBaseMatch.note)}` : ''}</span></div></div>`
-        };
-    }
-
-    return {
-        passed: false,
-        html: `<div class="validation-box error">${icons.error}<div><strong>Conta nao cadastrada:</strong> a conta informada (<b>${escapeHtml(formatAccountSummary(logAccount))}</b>) nao foi localizada na base local de usuarios.</div></div>`
-    };
-}
-
 // -------------------------------------------------------------
 // ESTADO GLOBAL & DASHBOARD INTERATIVO
 // -------------------------------------------------------------
@@ -2561,9 +2491,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     }
 
     const ispbValidation = buildIspbValidation(meta, transmissoraEncontrada, validationIcons);
-    const userAccountValidation = buildUserAccountValidation(meta, validationIcons);
     if (!ispbValidation.passed) testPassed = false;
-    if (!userAccountValidation.passed) testPassed = false;
 
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
     const dataStatus = testPassed ? 'passed' : 'failed';
@@ -2658,7 +2586,6 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
 
         ${validacaoInstHtml}
         ${ispbValidation.html}
-        ${userAccountValidation.html}
         ${resolutionHintHtml}
         ${validacaoHtml}
         ${failureSummaryHtml}
