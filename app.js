@@ -2343,7 +2343,7 @@ function analyzeFvpLogs(htmlString) {
 // -------------------------------------------------------------
 // VALIDADOR FINAL (COM ÍCONES SVG DE ALTO NÍVEL)
 // -------------------------------------------------------------
-// Exibe a grade de metadados do log (AS-ID, Test Name, Ciclo, SD Ticket...) e o card "Dados do Credor".
+// Exibe a grade de metadados do log (AS-ID, Test Name, Ciclo, SD Ticket...).
 // Desabilitada: a conferência desses dados é feita pela Correlação SIGC. Troque para true para voltar a exibir.
 const SHOW_LOG_METADATA = false;
 
