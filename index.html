@@ -123,10 +123,13 @@
                             <button class="filter-btn success" data-filter="passed"><span style="color: var(--status-success);">●</span> Sucessos: <strong id="countPassed">0</strong></button>
                             <button class="filter-btn danger" data-filter="failed"><span style="color: var(--status-danger);">●</span> Falhas: <strong id="countFailed">0</strong></button>
                         </div>
+                        <div class="results-actions">
+                        <button id="sigcCheckAllBtn" class="btn-outline" title="Busca cada teste no SIGC Retestes pelo SD Ticket e compara os dados">Conferir todos no SIGC</button>
                         <button id="clearBtn" class="btn-outline danger-outline">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                             Limpar mesa
                         </button>
+                        </div>
                     </div>
 
                     <div id="resultsContainer">

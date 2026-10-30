@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "QA Analytics - Correlação SIGC",
+  "version": "1.0.0",
+  "description": "Correlaciona os testes do validador de logs FVP com a plataforma SIGC Retestes usando a sessão já logada do navegador.",
+  "permissions": ["tabs", "debugger", "scripting"],
+  "host_permissions": ["https://www.sigc.com.br/*", "https://sigc.com.br/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.sigc.com.br/*", "https://sigc.com.br/*"],
+      "js": ["sigc-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "file:///*",
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://*.github.io/*"
+      ],
+      "js": ["validator-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -62,6 +62,7 @@ function setActiveView(activeView) {
 
 if(btnNavTests && btnNavDocs && viewTests && viewDocs) {
     btnNavTests.addEventListener('click', () => setActiveView('tests'));
+    btnNavStateDashboard?.addEventListener('click', () => setActiveView('state-dashboard'));
     btnNavDocs.addEventListener('click', () => setActiveView('docs'));
     btnNavDailyReport?.addEventListener('click', () => setActiveView('daily-report'));
 }
@@ -2412,6 +2413,10 @@ function analyzeFvpLogs(htmlString) {
 // -------------------------------------------------------------
 // VALIDADOR FINAL (COM ÍCONES SVG DE ALTO NÍVEL)
 // -------------------------------------------------------------
+// Exibe a grade de metadados do log (AS-ID, Test Name, Ciclo, SD Ticket...) e o card "Dados do Credor".
+// Desabilitada: a conferência desses dados é feita pela Correlação SIGC. Troque para true para voltar a exibir.
+const SHOW_LOG_METADATA = false;
+
 function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, testPassed) {
     
     let validacaoHtml = "";
@@ -2604,6 +2609,36 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             </ul>
         </div>` : '';
 
+    // Dados enviados para a correlação com o SIGC Retestes (extensão do navegador)
+    const sigcCheckId = registerSigcPayload({
+        fileName,
+        sdTicket: meta.sdTicket,
+        cycle: meta.runCycle,
+        asId: meta.asId,
+        alias: meta.alias,
+        testName: meta.testName,
+        testId: meta.testId,
+        institutionName: meta.institutionName,
+        brandName: transmissoraEncontrada?.nome || '',
+        segment: resolvedIsPF ? 'PF' : resolvedIsPJ ? 'PJ' : '',
+        testPassed,
+        runType: meta.runType,
+        device: meta.device,
+        executionDate: meta.executionCreatedUtc ? String(meta.executionCreatedBrasilia).split(',')[0].trim() : ''
+    });
+    // Busca automática só para testes com SD; leitura do pop-up aberto em cada módulo do SIGC.
+    const sigcReadButtons = Object.entries(SIGC_READ_PAGES).map(([page, name]) => `
+                <button type="button" class="btn-view-log btn-sigc-read" data-sigc-id="${sigcCheckId}" data-sigc-page="${page}" title="Lê o pop-up do teste que já está aberto na tela ${name} do SIGC, sem pesquisar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    Ler ${name}
+                </button>`).join('');
+    const sigcButtonHtml = (sigcPayloads[sigcCheckId]?.module === 'retestes'
+        ? `<button type="button" class="btn-view-log btn-sigc-check" data-sigc-id="${sigcCheckId}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    Conferir no SIGC
+                </button>`
+        : '') + sigcReadButtons;
+
     let html = `
     <div class="file-report ${borderStatusClass}" data-status="${dataStatus}">
         <h3 class="file-header" style="justify-content: space-between;">
@@ -2616,9 +2651,11 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                     Abrir Log
                 </a>
+                ${sigcButtonHtml}
             </div>
         </h3>
-        
+        ${sigcCheckId ? `<div class="sigc-result" id="sigc-result-${sigcCheckId}" hidden></div>` : ''}
+
         ${validacaoInstHtml}
         ${ispbValidation.html}
         ${userAccountValidation.html}
@@ -2626,6 +2663,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         ${validacaoHtml}
         ${failureSummaryHtml}
 
+        ${SHOW_LOG_METADATA ? `
         <div class="metadata-grid">
             <div class="metadata-item"><span>Auth. Server ID Oficial</span><strong>${meta.asId}</strong></div>
             <div class="metadata-item"><span>Marca Identificada</span><strong>${meta.institutionName}</strong></div>
@@ -2643,6 +2681,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             ${meta.cnpj && meta.cnpj !== "Não encontrado" ? `<div class="metadata-item"><span>CNPJ Detectado</span><strong>${meta.cnpj}</strong></div>` : ""}
         </div>
         ${creditorCardHtml}
+        ` : ``}
     `;
 
     if (!testPassed || evidencias.mostrarPainel) {
@@ -2694,6 +2733,261 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     html += `</div>`;
     return { html, isPassed: testPassed };
 }
+
+// -------------------------------------------------------------
+// CORRELAÇÃO COM O SIGC RETESTES (via extensão "QA Analytics - Correlação SIGC")
+// A extensão usa a sessão já logada no navegador; nenhum dado é armazenado.
+// -------------------------------------------------------------
+// Módulos do SIGC onde o pop-up aberto pode ser lido (mesmas chaves da extensão).
+const SIGC_READ_PAGES = { retestes: 'Reteste', grupo: 'Qualidade', execucao: 'Execução' };
+const sigcPayloads = {};
+const sigcPendingRequests = {};
+let sigcPayloadSeq = 0;
+
+function isSigcMissing(value) {
+    return !value || /^n.{1,3}o encontrado$/i.test(String(value).trim());
+}
+
+// Retestes podem ter mais de um SD Ticket ("245699, 243070"): vale o primeiro, antes da vírgula.
+function primarySdTicket(value) {
+    return String(value ?? '').split(/[,;/|]/)[0].replace(/\D/g, '');
+}
+
+// Sem SD Ticket = teste de grupo: conferido pelo pop-up aberto na tela de Qualidade do SIGC.
+function registerSigcPayload(payload) {
+    if (isSigcMissing(payload.sdTicket) || !primarySdTicket(payload.sdTicket)) {
+        payload.module = 'grupo';
+        payload.sdTicket = '';
+    } else {
+        payload.module = 'retestes';
+        payload.sdTicketOriginal = payload.sdTicket;
+        payload.sdTicket = primarySdTicket(payload.sdTicket);
+    }
+    const id = `sigc${++sigcPayloadSeq}`;
+    sigcPayloads[id] = payload;
+    return id;
+}
+
+function isSigcExtensionReady() {
+    return document.documentElement.dataset.sigcExtension === 'ready';
+}
+
+function requestSigcCheck(payload) {
+    return new Promise(resolve => {
+        const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        sigcPendingRequests[requestId] = resolve;
+        window.postMessage({ source: 'qa-validator', type: 'SIGC_CHECK', requestId, payload }, '*');
+    });
+}
+
+window.addEventListener('message', event => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.source !== 'sigc-extension' || data.type !== 'SIGC_RESULT') return;
+    const resolve = sigcPendingRequests[data.requestId];
+    if (!resolve) return;
+    delete sigcPendingRequests[data.requestId];
+    resolve(data.result);
+});
+
+function compareSigcFields(payload, sigc) {
+    const norm = value => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const checks = [];
+
+    const add = (label, logValue, sigcValue, comparator, level = 'error') => {
+        if (isSigcMissing(logValue)) {
+            checks.push({ label, logValue: 'Não disponível no log', sigcValue: sigcValue || '—', status: 'neutral' });
+            return;
+        }
+        if (!sigcValue) {
+            checks.push({ label, logValue, sigcValue: 'Não encontrado no SIGC', status: 'warning' });
+            return;
+        }
+        checks.push({ label, logValue, sigcValue, status: comparator(logValue, sigcValue) ? 'success' : level });
+    };
+
+    add('SD Ticket', payload.sdTicket, sigc.serviceDesk, (a, b) => primarySdTicket(a) === primarySdTicket(b));
+    if (payload.sdTicketOriginal && payload.sdTicketOriginal.trim() !== payload.sdTicket) {
+        checks[checks.length - 1].logValue = `${payload.sdTicket} (no log: ${payload.sdTicketOriginal})`;
+    }
+    // Ciclo: só exibido na tela (log x SIGC), sem marcar como certo ou errado.
+    checks.push({ label: 'Ciclo', logValue: isSigcMissing(payload.cycle) ? 'Não disponível no log' : payload.cycle, sigcValue: sigc.ciclo || 'Não encontrado no SIGC', status: 'neutral' });
+    add('AS-ID', payload.asId, sigc.asId, (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase());
+    add('Alias', payload.alias, sigc.alias, (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase());
+
+    const testIds = (sigc.testIds || []).map(item => item.valor);
+    const matchedAttempt = (sigc.testIds || []).find(item => item.valor.trim() === String(payload.testId || '').trim());
+    add('Test_ID', payload.testId, testIds.join(' / '),
+        () => !!matchedAttempt);
+    if (matchedAttempt) checks[checks.length - 1].sigcValue = `${matchedAttempt.valor} (${matchedAttempt.tentativa})`;
+
+    add('Teste principal', payload.testName, sigc.testePrincipal,
+        (a, b) => norm(b).includes(norm(a)) || norm(a).includes(norm(b)), 'warning');
+
+    const nameMatches = (logName, sigcName) => {
+        const s = norm(sigcName);
+        return [logName, payload.brandName].some(name => {
+            const n = norm(name);
+            return n && (n.includes(s) || s.includes(n));
+        });
+    };
+    add('Instituição', payload.brandName || payload.institutionName, sigc.nomeInstituicao, nameMatches, 'warning');
+
+    if (payload.segment) add('Segmento', payload.segment, sigc.segmento, (a, b) => norm(a) === norm(b));
+
+    // Resultado do validador x "Status Teste" preenchido no SIGC ("OK" / "Não OK").
+    const sigcStatus = /^selecione$/i.test(String(sigc.statusTeste || '').trim()) ? '' : sigc.statusTeste;
+    add('Status Teste', payload.testPassed ? 'OK (aprovado no validador)' : 'Não OK (reprovado no validador)', sigcStatus,
+        (_, b) => (norm(b) === 'ok') === !!payload.testPassed);
+
+    // Tipo da execução do log (Retest / Test) x "Grupo" do SIGC (Reteste, ...).
+    const runTypeLabel = { Retest: 'Retest', Test: 'Test' }[payload.runType] || '';
+    add('Grupo', runTypeLabel, sigc.grupo,
+        (a, b) => (a === 'Retest') === norm(b).includes('retest'), 'warning');
+
+    // Dispositivo do log (user-agent) x "Tipo Teste" do SIGC (App-IOS, App-Android, ...).
+    const device = ['iOS', 'Android', 'Desktop'].includes(payload.device) ? payload.device : '';
+    add('Tipo Teste', device, sigc.tipoTeste, (a, b) => {
+        const t = norm(b);
+        if (a === 'iOS') return t.includes('ios');
+        if (a === 'Android') return t.includes('android');
+        return !t.includes('ios') && !t.includes('android');
+    }, 'warning');
+
+    // Data de início da execução no log x "Data execução Teste" do SIGC (dd/mm/aaaa).
+    const dateKey = value => (String(value ?? '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/) || []).slice(1)
+        .map((part, i) => i === 2 ? part.slice(-2) : part.padStart(2, '0')).join('/');
+    add('Data execução', payload.executionDate, sigc.dataExecucao,
+        (a, b) => !!dateKey(a) && dateKey(a) === dateKey(b), 'warning');
+
+    return checks;
+}
+
+function renderSigcResult(container, payload, result) {
+    container.hidden = false;
+
+    if (!result?.ok) {
+        container.innerHTML = `
+            <div class="validation-box ${result?.notFound ? 'warning' : 'error'}">
+                <div><strong>Correlação SIGC:</strong> ${escapeHtml(result?.error || 'Falha desconhecida na consulta.')}</div>
+            </div>`;
+        return;
+    }
+
+    const checks = compareSigcFields(payload, result.fields);
+    const hasError = checks.some(check => check.status === 'error');
+    const hasWarning = checks.some(check => check.status === 'warning');
+    const overall = hasError ? 'error' : hasWarning ? 'warning' : 'success';
+    const title = hasError
+        ? 'Divergência entre o log e o SIGC'
+        : hasWarning ? 'Correlação OK com observações' : 'Tudo OK: o teste no SIGC confere com o log';
+    const nextStep = hasError
+        ? 'Revise as divergências antes de seguir com o preenchimento no SIGC.'
+        : 'O pop-up do teste ficou aberto no SIGC para você seguir com o preenchimento.';
+    const icon = { success: '✔', error: '✖', warning: '!', neutral: '–' };
+
+    const f = result.fields;
+    const isGroup = payload.module === 'grupo';
+    const extra = [
+        f.nomeInstituicao && `Instituição: <strong>${escapeHtml(f.nomeInstituicao)}</strong>`,
+        f.grupo && `Grupo: <strong>${escapeHtml(f.grupo)}</strong>`,
+        f.tipoTeste && `Tipo: <strong>${escapeHtml(f.tipoTeste)}</strong>`,
+        f.sla && `SLA: <strong>${escapeHtml(f.sla)}</strong>`,
+        f.status && `Status: <strong>${escapeHtml(f.status)}</strong>`,
+        f.resultado && `Resultado: <strong>${escapeHtml(f.resultado)}</strong>`,
+        f.responsavel && `Responsável: <strong>${escapeHtml(f.responsavel)}</strong>`,
+        result.rowsFound > 1 && `<span style="color: var(--status-warning);">${result.rowsFound} testes com este SD no SIGC; usado o de teste principal mais parecido.</span>`
+    ].filter(Boolean).join(' · ');
+
+    container.innerHTML = `
+        <div class="validation-box ${overall} sigc-result-box">
+            <div style="width: 100%;">
+                <strong>Correlação SIGC ${{ grupo: 'Qualidade', execucao: 'Execução de Testes' }[result.page] || 'Retestes'}${isGroup ? ' (grupo)' : ''}:</strong> ${title}
+                <table class="sigc-compare-table">
+                    <thead><tr><th></th><th>Campo</th><th>Log (FVP)</th><th>SIGC</th></tr></thead>
+                    <tbody>
+                        ${checks.map(check => `
+                            <tr class="sigc-${check.status}">
+                                <td class="sigc-icon">${icon[check.status]}</td>
+                                <td>${escapeHtml(check.label)}</td>
+                                <td>${escapeHtml(check.logValue)}</td>
+                                <td>${escapeHtml(check.sigcValue)}</td>
+                            </tr>`).join('')}
+                    </tbody>
+                </table>
+                ${extra ? `<div class="validation-detail" style="margin-top: 8px;">${extra}</div>` : ''}
+                ${isGroup && f.campos?.length ? `
+                    <details class="validation-detail" style="margin-top: 8px;">
+                        <summary>Todos os campos lidos do pop-up (${f.campos.length})</summary>
+                        ${f.campos.map(c => `<div>${escapeHtml(c.label)}: <strong>${escapeHtml(c.valor || '—')}</strong></div>`).join('')}
+                    </details>` : ''}
+                <div class="sigc-next-step">
+                    <span>${nextStep}</span>
+                    <button type="button" class="btn-view-log btn-sigc-focus" data-sigc-module="${result.page || payload.module}">Ir para o SIGC</button>
+                </div>
+            </div>
+        </div>`;
+}
+
+// readOnly: só lê o pop-up já aberto no SIGC, sem pesquisar nem trocar de aba.
+async function runSigcCheck(button, readOnly = false) {
+    const id = button.dataset.sigcId;
+    const payload = sigcPayloads[id];
+    const container = document.getElementById(`sigc-result-${id}`);
+    if (!payload || !container) return;
+
+    if (!isSigcExtensionReady()) {
+        container.hidden = false;
+        container.innerHTML = `
+            <div class="validation-box warning">
+                <div><strong>Correlação SIGC:</strong> a extensão "QA Analytics - Correlação SIGC" não está instalada ou ativa neste navegador. Veja as instruções em <code>extensao-sigc/LEIAME.md</code>.</div>
+            </div>`;
+        return;
+    }
+
+    button.disabled = true;
+    const originalLabel = button.innerHTML;
+    button.textContent = readOnly ? 'Lendo pop-up...' : 'Consultando SIGC...';
+    container.hidden = false;
+    const page = button.dataset.sigcPage;
+    const testLabel = payload.sdTicket ? `do SD ${escapeHtml(payload.sdTicket)}` : 'do teste de grupo';
+    container.innerHTML = readOnly
+        ? `<div class="resolution-hint">Lendo o pop-up ${testLabel} aberto no SIGC ${SIGC_READ_PAGES[page] || ''}...</div>`
+        : `<div class="resolution-hint">Buscando SD ${escapeHtml(payload.sdTicket)} no SIGC Retestes...</div>`;
+
+    const result = await requestSigcCheck(readOnly ? { ...payload, readOnly: true, page } : payload);
+    renderSigcResult(container, payload, result);
+
+    button.disabled = false;
+    button.innerHTML = originalLabel;
+}
+
+document.getElementById('resultsContainer')?.addEventListener('click', event => {
+    const button = event.target.closest('.btn-sigc-check');
+    if (button && !button.disabled) runSigcCheck(button);
+    const readButton = event.target.closest('.btn-sigc-read');
+    if (readButton && !readButton.disabled) runSigcCheck(readButton, true);
+    const focusButton = event.target.closest('.btn-sigc-focus');
+    if (focusButton) {
+        window.postMessage({ source: 'qa-validator', type: 'SIGC_FOCUS', module: focusButton.dataset.sigcModule }, '*');
+    }
+});
+
+document.getElementById('sigcCheckAllBtn')?.addEventListener('click', async event => {
+    const allButton = event.currentTarget;
+    const buttons = [...document.querySelectorAll('#resultsContainer .btn-sigc-check')]
+        .filter(button => button.offsetParent !== null);
+    if (!buttons.length) return;
+
+    allButton.disabled = true;
+    for (let i = 0; i < buttons.length; i++) {
+        allButton.textContent = `Conferindo ${i + 1} de ${buttons.length}...`;
+        await runSigcCheck(buttons[i]);
+        if (!isSigcExtensionReady()) break;
+    }
+    allButton.disabled = false;
+    allButton.textContent = 'Conferir todos no SIGC';
+});
 
 // -------------------------------------------------------------
 // DASHBOARD EM LOTE: NOKS DE STATE E SESSAO DESLOGADA

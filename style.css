@@ -714,3 +714,19 @@ body {
         align-items: flex-start;
     }
 }
+
+/* ================== CORRELAÇÃO SIGC RETESTES ================== */
+.results-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.btn-sigc-check, .btn-sigc-read { cursor: pointer; font-family: inherit; }
+.btn-sigc-check:disabled, .btn-sigc-read:disabled, #sigcCheckAllBtn:disabled { opacity: 0.6; cursor: wait; }
+.sigc-result-box { overflow-x: auto; }
+.sigc-compare-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+.sigc-compare-table th, .sigc-compare-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border-color); word-break: break-all; }
+.sigc-compare-table th { color: var(--text-muted); font-weight: 600; }
+.sigc-compare-table .sigc-icon { width: 24px; font-weight: 700; text-align: center; }
+.sigc-compare-table .sigc-success .sigc-icon { color: var(--status-success); }
+.sigc-compare-table .sigc-error .sigc-icon, .sigc-compare-table .sigc-error td:nth-child(4) { color: var(--status-danger); }
+.sigc-compare-table .sigc-warning .sigc-icon { color: var(--status-warning); }
+.sigc-compare-table .sigc-neutral { color: var(--text-muted); }
+.sigc-next-step { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 0.85rem; }
+.btn-sigc-focus { cursor: pointer; font-family: inherit; }
