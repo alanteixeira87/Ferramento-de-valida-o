@@ -2782,12 +2782,11 @@ function buildEvidenceReply(payload, fields) {
     if (!links.length) return '';
 
     const single = links.length === 1;
-    const testName = fields.testePrincipal || payload.testName || '';
 
     return [
         'Olá,',
         '',
-        `${single ? 'Segue o link da evidência' : 'Seguem os links das evidências'} do teste${testName ? ` ${testName}` : ''}${payload.sdTicket ? ` (SD ${payload.sdTicket})` : ''}:`,
+        `${single ? 'Segue o link da evidência' : 'Seguem os links das evidências'} do teste${payload.sdTicket ? ` (SD ${payload.sdTicket})` : ''}:`,
         '',
         ...links.map((item, i) => `Evidência ${(item.nome.match(/\d+/) || [i + 1])[0].replace(/^0+(?=\d)/, '')}: ${item.link}`),
         '',
