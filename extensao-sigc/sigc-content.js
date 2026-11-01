@@ -164,6 +164,44 @@
         return el ? readElementValue(el) : '';
     }
 
+    // Link de uma evidência: aceita <a href>, campo de texto com a URL ou texto simples.
+    function linkValue(el) {
+        const anchor = el.tagName === 'A' ? el : (el.closest('a[href]') || el.querySelector?.('a[href]'));
+        if (anchor?.href && !/^javascript:/i.test(anchor.href)) return anchor.href;
+        return readElementValue(el);
+    }
+
+    // Valor da evidência embaixo do rótulo ou à direita dele, na mesma linha.
+    function evidenceValueNear(label, popup) {
+        const lr = label.getBoundingClientRect();
+        const candidates = [
+            ...[...popup.querySelectorAll('input, textarea, a[href]')].filter(isVisible),
+            ...textElements(popup).filter(item => !/:$/.test(item.text)).map(item => item.el)
+        ];
+        let best = null;
+        let bestScore = Infinity;
+        for (const el of candidates) {
+            if (el === label || el.contains(label) || label.contains(el)) continue;
+            const r = el.getBoundingClientRect();
+            const dy = r.top - lr.bottom;
+            const below = dy >= -4 && dy <= 45 && r.left <= lr.left + 40 && r.right >= lr.left + 2;
+            const right = Math.abs((r.top + r.height / 2) - (lr.top + lr.height / 2)) <= 14 && r.left >= lr.right - 5 && r.left - lr.right <= 400;
+            if (!below && !right) continue;
+            const score = below ? Math.max(dy, 0) * 3 + Math.abs(r.left - lr.left) : (r.left - lr.right);
+            if (score < bestScore) { bestScore = score; best = el; }
+        }
+        return best;
+    }
+
+    // Links de evidência do pop-up ("Link Evidência 1", "Evidência 2", ...).
+    function readEvidenceLinks(popup) {
+        return findLabels(/^(link\s*(d[aeo]s?\s*)?)?evidencias?\s*\d+$/, popup)
+            .map(label => {
+                const el = evidenceValueNear(label, popup);
+                return { nome: normalizeText(label.textContent).replace(/:$/, ''), link: el ? linkValue(el) : '' };
+            });
+    }
+
     function readPopup(popup) {
         const testIds = findLabels(/^\d\s*[ºª°o]?\s*tentativa$/, popup)
             .map(label => {
@@ -188,7 +226,8 @@
             resultado: readPopupField(popup, 'Resultado'),
             statusTeste: readPopupField(popup, 'Status Teste'),
             dataExecucao: readPopupField(popup, /^data execucao( teste)?$/),
-            testIds
+            testIds,
+            evidencias: readEvidenceLinks(popup)
         };
     }
 

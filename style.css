@@ -730,3 +730,10 @@ body {
 .sigc-compare-table .sigc-neutral { color: var(--text-muted); }
 .sigc-next-step { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 0.85rem; }
 .btn-sigc-focus { cursor: pointer; font-family: inherit; }
+.sigc-evidence { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color); display: grid; gap: 6px; font-size: 0.85rem; }
+.sigc-evidence-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sigc-evidence-row { display: grid; grid-template-columns: minmax(110px, auto) 1fr auto; align-items: center; gap: 10px; }
+.sigc-evidence-name { color: var(--text-muted); font-weight: 600; }
+.sigc-evidence-link { min-width: 0; word-break: break-all; }
+.sigc-evidence-link em { color: var(--text-muted); }
+.btn-sigc-copy { cursor: pointer; font-family: inherit; padding: 4px 10px; font-size: 0.8rem; }

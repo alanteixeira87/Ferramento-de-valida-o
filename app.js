@@ -2812,6 +2812,26 @@ function renderSigcResult(container, payload, result) {
         result.rowsFound > 1 && `<span style="color: var(--status-warning);">${result.rowsFound} testes com este SD no SIGC; usado o de teste principal mais parecido.</span>`
     ].filter(Boolean).join(' · ');
 
+    // Links de evidência do pop-up, prontos para copiar na resposta do Service Desk.
+    const evidences = f.evidencias || [];
+    const filledEvidences = evidences.filter(item => item.link);
+    const evidenceLink = link => /^https?:\/\//i.test(link)
+        ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a>`
+        : escapeHtml(link);
+    const evidenceHtml = evidences.length ? `
+                <div class="sigc-evidence">
+                    <div class="sigc-evidence-head">
+                        <strong>Evidências no SIGC</strong>
+                        ${filledEvidences.length ? `<button type="button" class="btn-view-log btn-sigc-copy" data-copy-text="${escapeHtml(filledEvidences.map(item => `${item.nome}: ${item.link}`).join('\n'))}">Copiar todas</button>` : ''}
+                    </div>
+                    ${evidences.map(item => `
+                        <div class="sigc-evidence-row">
+                            <span class="sigc-evidence-name">${escapeHtml(item.nome)}</span>
+                            <span class="sigc-evidence-link">${item.link ? evidenceLink(item.link) : '<em>não preenchida</em>'}</span>
+                            ${item.link ? `<button type="button" class="btn-view-log btn-sigc-copy" data-copy-text="${escapeHtml(item.link)}">Copiar</button>` : ''}
+                        </div>`).join('')}
+                </div>` : '';
+
     container.innerHTML = `
         <div class="validation-box ${overall} sigc-result-box">
             <div style="width: 100%;">
@@ -2829,6 +2849,7 @@ function renderSigcResult(container, payload, result) {
                     </tbody>
                 </table>
                 ${extra ? `<div class="validation-detail" style="margin-top: 8px;">${extra}</div>` : ''}
+                ${evidenceHtml}
                 ${isGroup && f.campos?.length ? `
                     <details class="validation-detail" style="margin-top: 8px;">
                         <summary>Todos os campos lidos do pop-up (${f.campos.length})</summary>
@@ -2884,7 +2905,27 @@ document.getElementById('resultsContainer')?.addEventListener('click', event => 
     if (focusButton) {
         window.postMessage({ source: 'qa-validator', type: 'SIGC_FOCUS', module: focusButton.dataset.sigcModule }, '*');
     }
+    const copyButton = event.target.closest('.btn-sigc-copy');
+    if (copyButton) copySigcText(copyButton);
 });
+
+// Copia o link (ou todos os links) de evidência; sem acesso ao clipboard, usa um campo temporário.
+async function copySigcText(button) {
+    const text = button.dataset.copyText || '';
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (_) {
+        const temp = document.createElement('textarea');
+        temp.value = text;
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        temp.remove();
+    }
+    const label = button.textContent;
+    button.textContent = 'Copiado!';
+    setTimeout(() => { button.textContent = label; }, 1500);
+}
 
 document.getElementById('sigcCheckAllBtn')?.addEventListener('click', async event => {
     const allButton = event.currentTarget;
