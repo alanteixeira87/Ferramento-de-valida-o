@@ -2703,6 +2703,15 @@ window.addEventListener('message', event => {
     resolve(data.result);
 });
 
+// Test ID de um link do FVP: o parâmetro "log" da URL.
+function sigcLinkTestId(link) {
+    try {
+        return (new URL(link).searchParams.get('log') || '').trim();
+    } catch (_) {
+        return (String(link).match(/[?&]log=([^&#\s]+)/) || [])[1] || '';
+    }
+}
+
 function compareSigcFields(payload, sigc) {
     const norm = value => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const checks = [];
@@ -2728,11 +2737,25 @@ function compareSigcFields(payload, sigc) {
     add('AS-ID', payload.asId, sigc.asId, (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase());
     add('Alias', payload.alias, sigc.alias, (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase());
 
+    // O link do FVP traz o Test ID em "log=" (log-detail.html?log=<Test ID>): mostra a qual evidência ele está vinculado.
+    const testId = String(payload.testId || '').trim();
+    const linkedEvidences = (sigc.evidencias || []).filter(item => item.link)
+        .map(item => ({ ...item, logId: sigcLinkTestId(item.link) }));
+    const linkedEvidence = linkedEvidences.find(item => item.logId === testId);
+    add('Test ID no link', testId,
+        linkedEvidence
+            ? `${linkedEvidence.nome}: ${linkedEvidence.link}`
+            : linkedEvidences.map(item => `${item.nome}: ${item.logId || 'sem Test ID no link'}`).join(' / '),
+        () => !!linkedEvidence);
+
+    // Tentativas (1ª/2ª/3ª) só existem em alguns módulos do SIGC; sem elas a linha não aparece.
     const testIds = (sigc.testIds || []).map(item => item.valor);
-    const matchedAttempt = (sigc.testIds || []).find(item => item.valor.trim() === String(payload.testId || '').trim());
-    add('Test_ID', payload.testId, testIds.join(' / '),
-        () => !!matchedAttempt);
-    if (matchedAttempt) checks[checks.length - 1].sigcValue = `${matchedAttempt.valor} (${matchedAttempt.tentativa})`;
+    if (testIds.length) {
+        const matchedAttempt = (sigc.testIds || []).find(item => item.valor.trim() === testId);
+        add('Test_ID', payload.testId, testIds.join(' / '),
+            () => !!matchedAttempt);
+        if (matchedAttempt) checks[checks.length - 1].sigcValue = `${matchedAttempt.valor} (${matchedAttempt.tentativa})`;
+    }
 
     add('Teste principal', payload.testName, sigc.testePrincipal,
         (a, b) => norm(b).includes(norm(a)) || norm(a).includes(norm(b)), 'warning');
