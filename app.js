@@ -2776,6 +2776,29 @@ function compareSigcFields(payload, sigc) {
     return checks;
 }
 
+// Só entram os links preenchidos; o texto muda para singular quando há uma evidência só.
+function buildEvidenceReply(payload, fields) {
+    const links = (fields.evidencias || []).filter(item => item.link);
+    if (!links.length) return '';
+
+    const single = links.length === 1;
+    const testName = fields.testePrincipal || payload.testName || '';
+    const reference = [
+        !isSigcMissing(payload.testId) && `Test ID ${payload.testId}`,
+        payload.sdTicket && `SD ${payload.sdTicket}`
+    ].filter(Boolean).join(' | ');
+
+    return [
+        'Olá,',
+        '',
+        `${single ? 'Segue o link da evidência' : 'Seguem os links das evidências'} do teste${testName ? ` ${testName}` : ''}${reference ? ` (${reference})` : ''}:`,
+        '',
+        ...links.map((item, i) => `Evidência ${(item.nome.match(/\d+/) || [i + 1])[0].replace(/^0+(?=\d)/, '')}: ${item.link}`),
+        '',
+        `${single ? 'A evidência está disponível' : 'As evidências estão disponíveis'} para conferência. Ficamos à disposição para qualquer dúvida.`
+    ].join('\n');
+}
+
 function renderSigcResult(container, payload, result) {
     container.hidden = false;
 
@@ -2812,24 +2835,15 @@ function renderSigcResult(container, payload, result) {
         result.rowsFound > 1 && `<span style="color: var(--status-warning);">${result.rowsFound} testes com este SD no SIGC; usado o de teste principal mais parecido.</span>`
     ].filter(Boolean).join(' · ');
 
-    // Links de evidência do pop-up, prontos para copiar na resposta do Service Desk.
-    const evidences = f.evidencias || [];
-    const filledEvidences = evidences.filter(item => item.link);
-    const evidenceLink = link => /^https?:\/\//i.test(link)
-        ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a>`
-        : escapeHtml(link);
-    const evidenceHtml = evidences.length ? `
+    // Texto padrão com os links de evidência preenchidos no pop-up (1 a 3), para a resposta no Service Desk.
+    const evidenceText = buildEvidenceReply(payload, f);
+    const evidenceHtml = evidenceText ? `
                 <div class="sigc-evidence">
                     <div class="sigc-evidence-head">
-                        <strong>Evidências no SIGC</strong>
-                        ${filledEvidences.length ? `<button type="button" class="btn-view-log btn-sigc-copy" data-copy-text="${escapeHtml(filledEvidences.map(item => `${item.nome}: ${item.link}`).join('\n'))}">Copiar todas</button>` : ''}
+                        <strong>Resposta para o Service Desk</strong>
+                        <button type="button" class="btn-view-log btn-sigc-copy" data-copy-text="${escapeHtml(evidenceText)}">Copiar texto para o Service Desk</button>
                     </div>
-                    ${evidences.map(item => `
-                        <div class="sigc-evidence-row">
-                            <span class="sigc-evidence-name">${escapeHtml(item.nome)}</span>
-                            <span class="sigc-evidence-link">${item.link ? evidenceLink(item.link) : '<em>não preenchida</em>'}</span>
-                            ${item.link ? `<button type="button" class="btn-view-log btn-sigc-copy" data-copy-text="${escapeHtml(item.link)}">Copiar</button>` : ''}
-                        </div>`).join('')}
+                    <pre class="sigc-evidence-text">${escapeHtml(evidenceText)}</pre>
                 </div>` : '';
 
     container.innerHTML = `
