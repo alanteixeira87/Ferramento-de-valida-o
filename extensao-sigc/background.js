@@ -14,7 +14,7 @@ let queue = Promise.resolve();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'SIGC_FOCUS') {
-        focusSigcTab(message.module);
+        focusSigcTab(message.module).catch(() => {});
         return false;
     }
     if (message?.type === 'TRUSTED_CLICK') {
