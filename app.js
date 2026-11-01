@@ -2799,14 +2799,23 @@ function compareSigcFields(payload, sigc) {
     return checks;
 }
 
+// Tira a primeira linha quando ela é só saudação ("Prezados,", "Bom dia, prezados", "Olá!").
+function stripGreeting(text) {
+    const lines = String(text || '').trim().split('\n');
+    const greeting = /^(ol[aá]|oi|bom dia|boa tarde|boa noite|prezad[oa]s?|car[oa]s?|senhor(es|as)?|pessoal|equipe|time)(\s+(senhor(es|as)?|colegas|equipe|time|pessoal|a todos|todos))?$/i;
+    const parts = (lines[0] || '').split(/[,!.;:]/).map(part => part.trim()).filter(Boolean);
+    if (parts.length && parts.every(part => greeting.test(part))) lines.shift();
+    return lines.join('\n').trim();
+}
+
 // Só entram os links preenchidos; o texto muda para singular quando há uma evidência só.
 function buildEvidenceReply(payload, fields) {
     const links = (fields.evidencias || []).filter(item => item.link);
     if (!links.length) return '';
 
     const single = links.length === 1;
-    // Observações do pop-up entram só nos retestes (testes com SD).
-    const observations = payload.module === 'retestes' ? String(fields.observacoes || '').trim() : '';
+    // Observações do pop-up entram só nos retestes (testes com SD), sem a saudação do QA: o texto já abre com "Olá,".
+    const observations = payload.module === 'retestes' ? stripGreeting(fields.observacoes) : '';
 
     return [
         'Olá,',
