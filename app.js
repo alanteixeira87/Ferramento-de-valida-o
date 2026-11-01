@@ -2839,7 +2839,10 @@ function renderSigcResult(container, payload, result) {
                         <button type="button" class="btn-view-log btn-sigc-copy" data-copy-text="${escapeHtml(evidenceText)}">Copiar texto para o Service Desk</button>
                     </div>
                     <pre class="sigc-evidence-text">${escapeHtml(evidenceText)}</pre>
-                </div>` : '';
+                </div>` : `
+                <div class="sigc-evidence validation-detail">
+                    Nenhum link de evidência encontrado no pop-up.${f.evidenciasDiag ? ` [Diagnóstico: ${escapeHtml(f.evidenciasDiag)}]` : ' Atualize a extensão (↻ em chrome://extensions) e tente de novo.'}
+                </div>`;
 
     container.innerHTML = `
         <div class="validation-box ${overall} sigc-result-box">

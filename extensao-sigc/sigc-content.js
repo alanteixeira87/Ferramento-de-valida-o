@@ -194,12 +194,28 @@
     }
 
     // Links de evidência do pop-up ("Link Evidência 1", "Evidência 2", ...).
+    // As evidências podem ficar fora do bloco do AS-ID: sobe pelos blocos do pop-up até achar os rótulos.
     function readEvidenceLinks(popup) {
-        return findLabels(/^(link\s*(d[aeo]s?\s*)?)?evidencias?\s*\d+$/, popup)
-            .map(label => {
-                const el = evidenceValueNear(label, popup);
-                return { nome: normalizeText(label.textContent).replace(/:$/, ''), link: el ? linkValue(el) : '' };
-            });
+        const pattern = /^(link\s*(d[aeo]s?\s*)?)?evidencias?\s*\d+$/;
+        let scope = popup;
+        let labels = [];
+        while (scope) {
+            labels = findLabels(pattern, scope);
+            if (labels.length || scope === document.body) break;
+            scope = scope.parentElement;
+        }
+        return labels.map(label => {
+            const el = evidenceValueNear(label, scope);
+            return { nome: normalizeText(label.textContent).replace(/:$/, ''), link: el ? linkValue(el) : '' };
+        });
+    }
+
+    // Textos com "evid" e links visíveis na tela, para ajustar a leitura quando nenhum link é encontrado.
+    function evidenceDiagnostics() {
+        const texts = [...new Set(textElements().map(item => item.text).filter(text => /evid/i.test(normalizeKey(text))))];
+        const links = [...document.querySelectorAll('a[href]')].filter(isVisible)
+            .map(a => a.href).filter(href => /^https?:/i.test(href) && !/sigc\.com\.br/i.test(href));
+        return `textos com "evid": ${texts.slice(0, 10).join(' | ') || 'nenhum'}; links externos visíveis: ${links.length}`;
     }
 
     function readPopup(popup) {
@@ -209,6 +225,7 @@
                 return { tentativa: normalizeText(label.textContent).replace(/:$/, ''), valor: el ? readElementValue(el) : '' };
             })
             .filter(item => item.valor);
+        const evidencias = readEvidenceLinks(popup);
 
         return {
             nomeInstituicao: readPopupField(popup, 'Nome Instituição'),
@@ -227,7 +244,8 @@
             statusTeste: readPopupField(popup, 'Status Teste'),
             dataExecucao: readPopupField(popup, /^data execucao( teste)?$/),
             testIds,
-            evidencias: readEvidenceLinks(popup)
+            evidencias,
+            evidenciasDiag: evidencias.some(item => item.link) ? '' : evidenceDiagnostics()
         };
     }
 
