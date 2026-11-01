@@ -195,8 +195,10 @@
 
     // Links de evidência do pop-up ("Link Evidência 1", "Evidência 2", ...).
     // As evidências podem ficar fora do bloco do AS-ID: sobe pelos blocos do pop-up até achar os rótulos.
+    // No SIGC os rótulos são "Link Evidência:" repetidos (sem número): a numeração segue a ordem na tela.
+    // "Evidência:" sozinho é o grupo Imagem/Vídeo/Assistida e não entra. Campo vazio aparece como "-".
     function readEvidenceLinks(popup) {
-        const pattern = /^(link\s*(d[aeo]s?\s*)?)?evidencias?\s*\d+$/;
+        const pattern = /^link\s*(d[aeo]s?\s*)?evidencias?(\s*\d+)?$|^evidencias?\s*\d+$/;
         let scope = popup;
         let labels = [];
         while (scope) {
@@ -204,10 +206,13 @@
             if (labels.length || scope === document.body) break;
             scope = scope.parentElement;
         }
-        return labels.map(label => {
-            const el = evidenceValueNear(label, scope);
-            return { nome: normalizeText(label.textContent).replace(/:$/, ''), link: el ? linkValue(el) : '' };
-        });
+        return labels
+            .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+            .map((label, i) => {
+                const el = evidenceValueNear(label, scope);
+                const link = el ? linkValue(el) : '';
+                return { nome: `Evidência ${i + 1}`, link: /^[\s\-–—]*$/.test(link) ? '' : link };
+            });
     }
 
     // Textos com "evid" e links visíveis na tela, para ajustar a leitura quando nenhum link é encontrado.
