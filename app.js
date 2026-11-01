@@ -2732,6 +2732,8 @@ function compareSigcFields(payload, sigc) {
     if (payload.sdTicketOriginal && payload.sdTicketOriginal.trim() !== payload.sdTicket) {
         checks[checks.length - 1].logValue = `${payload.sdTicket} (no log: ${payload.sdTicketOriginal})`;
     }
+    // SD confirmado no SIGC: botão para copiar o número e colar no Service Desk.
+    if (checks[checks.length - 1].status === 'success') checks[checks.length - 1].copyText = payload.sdTicket;
     // Ciclo: só exibido na tela (log x SIGC), sem marcar como certo ou errado.
     checks.push({ label: 'Ciclo', logValue: isSigcMissing(payload.cycle) ? 'Não disponível no log' : payload.cycle, sigcValue: sigc.ciclo || 'Não encontrado no SIGC', status: 'neutral' });
     add('AS-ID', payload.asId, sigc.asId, (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase());
@@ -2891,7 +2893,7 @@ function renderSigcResult(container, payload, result) {
                                 <td class="sigc-icon">${icon[check.status]}</td>
                                 <td>${escapeHtml(check.label)}</td>
                                 <td>${escapeHtml(check.logValue)}</td>
-                                <td>${escapeHtml(check.sigcValue)}</td>
+                                <td>${escapeHtml(check.sigcValue)}${check.copyText ? ` <button type="button" class="btn-view-log btn-sigc-copy" data-copy-text="${escapeHtml(check.copyText)}">Copiar</button>` : ''}</td>
                             </tr>`).join('')}
                     </tbody>
                 </table>
