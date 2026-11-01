@@ -215,6 +215,23 @@
             });
     }
 
+    // Campo "Observações" do pop-up, mantendo as quebras de linha. Vazio ou "-" vira "".
+    function readObservations(popup) {
+        let scope = popup;
+        let label = null;
+        while (scope && !label) {
+            [label] = findLabels(/^(observac(ao|oes)|obs)$/, scope);
+            if (scope === document.body) break;
+            if (!label) scope = scope.parentElement;
+        }
+        if (!label) return '';
+        const el = evidenceValueNear(label, scope);
+        if (!el) return '';
+        const raw = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' ? el.value : el.innerText;
+        const text = String(raw || '').replace(/\r/g, '').replace(/[ \t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+        return /^[\s\-–—]*$/.test(text) ? '' : text;
+    }
+
     // Textos com "evid" e links visíveis na tela, para ajustar a leitura quando nenhum link é encontrado.
     function evidenceDiagnostics() {
         const texts = [...new Set(textElements().map(item => item.text).filter(text => /evid/i.test(normalizeKey(text))))];
@@ -250,7 +267,8 @@
             dataExecucao: readPopupField(popup, /^data execucao( teste)?$/),
             testIds,
             evidencias,
-            evidenciasDiag: evidencias.some(item => item.link) ? '' : evidenceDiagnostics()
+            evidenciasDiag: evidencias.some(item => item.link) ? '' : evidenceDiagnostics(),
+            observacoes: readObservations(popup)
         };
     }
 

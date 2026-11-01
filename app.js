@@ -2805,6 +2805,8 @@ function buildEvidenceReply(payload, fields) {
     if (!links.length) return '';
 
     const single = links.length === 1;
+    // Observações do pop-up entram só nos retestes (testes com SD).
+    const observations = payload.module === 'retestes' ? String(fields.observacoes || '').trim() : '';
 
     return [
         'Olá,',
@@ -2813,6 +2815,7 @@ function buildEvidenceReply(payload, fields) {
         '',
         ...links.map((item, i) => `Evidência ${(item.nome.match(/\d+/) || [i + 1])[0].replace(/^0+(?=\d)/, '')}: ${item.link}`),
         '',
+        ...(observations ? ['Observações:', observations, ''] : []),
         `${single ? 'A evidência está disponível' : 'As evidências estão disponíveis'} para conferência. Ficamos à disposição para qualquer dúvida.`
     ].join('\n');
 }
