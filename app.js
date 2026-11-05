@@ -1,4 +1,59 @@
 // -------------------------------------------------------------
+// ÍCONES (Lucide, https://lucide.dev): SVG embutido que herda currentColor
+// -------------------------------------------------------------
+const LUCIDE_ICONS = {
+    'check': '<path d="M20 6 9 17l-5-5"/>',
+    'x': '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    'minus': '<path d="M5 12h14"/>',
+    'triangle-alert': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    'circle-x': '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+    'file-text': '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    'camera': '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+    'lock-open': '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+    'lightbulb': '<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>',
+    'search': '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+    'loader-circle': '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+    'chevron-left': '<path d="m15 18-6-6 6-6"/>',
+    'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+    'rotate-cw': '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+    'grip-vertical': '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
+    'sun': '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+    'moon': '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'
+};
+function lucideIcon(name, size = 18, extraClass = '') {
+    return `<svg class="icon ${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LUCIDE_ICONS[name]}</svg>`;
+}
+
+// -------------------------------------------------------------
+// TEMA CLARO / ESCURO
+// Sem escolha salva, segue o sistema operacional; o botão grava a escolha em data-theme.
+// -------------------------------------------------------------
+const THEME_KEY = 'qa-theme';
+const systemDarkTheme = window.matchMedia('(prefers-color-scheme: dark)');
+const themeToggles = document.querySelectorAll('[data-theme-toggle]');
+
+function currentTheme() {
+    return document.documentElement.dataset.theme || (systemDarkTheme.matches ? 'dark' : 'light');
+}
+
+function renderThemeToggles() {
+    const isDark = currentTheme() === 'dark';
+    themeToggles.forEach(button => {
+        button.innerHTML = `${lucideIcon(isDark ? 'sun' : 'moon', 18)}<span>${isDark ? 'Tema claro' : 'Tema escuro'}</span>`;
+        button.setAttribute('aria-label', isDark ? 'Mudar para o tema claro' : 'Mudar para o tema escuro');
+    });
+}
+
+themeToggles.forEach(button => button.addEventListener('click', () => {
+    const next = currentTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    renderThemeToggles();
+}));
+systemDarkTheme.addEventListener('change', renderThemeToggles);
+renderThemeToggles();
+
+// -------------------------------------------------------------
 // LÓGICA DE LOGIN E NAVEGAÇÃO SPA (DASHBOARD)
 // -------------------------------------------------------------
 const loginForm = document.getElementById('loginForm');
@@ -562,7 +617,7 @@ const operationalTestRules = [
 const operationalModalHtml = `
 <div id="operationalRulesModal" class="operational-modal" aria-hidden="true">
     <div class="operational-modal-card">
-        <button type="button" id="operationalModalClose" class="operational-modal-close" aria-label="Fechar">&times;</button>
+        <button type="button" id="operationalModalClose" class="operational-modal-close" aria-label="Fechar">${lucideIcon('x', 20)}</button>
         <h2>Orientações para teste de longa duração</h2>
         <div id="operationalTestSelectorWrap">
             <label for="operationalTestSelector">Teste operacional</label>
@@ -667,11 +722,11 @@ if(clearBtn) {
 // -------------------------------------------------------------
 const modalHTML = `
 <div id="lightboxModal" class="lightbox-modal">
-    <span id="lightboxClose" class="lightbox-close">&times;</span>
-    <span id="lightboxPrev" class="lightbox-nav lightbox-prev">&#10094;</span>
+    <button type="button" id="lightboxClose" class="lightbox-close" aria-label="Fechar">${lucideIcon('x', 20)}</button>
+    <button type="button" id="lightboxPrev" class="lightbox-nav lightbox-prev" aria-label="Imagem anterior">${lucideIcon('chevron-left', 20)}</button>
     <img id="lightboxImg" class="lightbox-content" src="">
     <div id="lightboxCaption" class="lightbox-caption"></div>
-    <span id="lightboxNext" class="lightbox-nav lightbox-next">&#10095;</span>
+    <button type="button" id="lightboxNext" class="lightbox-nav lightbox-next" aria-label="Próxima imagem">${lucideIcon('chevron-right', 20)}</button>
 </div>`;
 document.body.insertAdjacentHTML('beforeend', modalHTML);
 
@@ -1405,7 +1460,7 @@ function renderErrorAnalysisPanel() {
                 </div>
                 <div class="analysis-jwt-token">${escapeHtml(item.token)}</div>
                 <a class="analysis-jwt-link" href="https://jwt.io/#debugger-io?token=${encodeURIComponent(item.token)}" target="_blank" rel="noreferrer">
-                    🔓 Abrir no jwt.io
+                    ${lucideIcon('lock-open', 16)} Abrir no jwt.io
                 </a>
             </div>
         `).join('')
@@ -1415,7 +1470,7 @@ function renderErrorAnalysisPanel() {
         <div class="analysis-shell">
             <div class="analysis-list">${listHtml}</div>
             <div class="analysis-panel">
-                <div class="analysis-pill">🧠 ${escapeHtml(activeAnalysis.likelyCause)}</div>
+                <div class="analysis-pill">${lucideIcon('lightbulb', 16)} ${escapeHtml(activeAnalysis.likelyCause)}</div>
                 <h3>${escapeHtml(activeAnalysis.fileName)}</h3>
                 <p><strong>Resumo do erro:</strong> ${escapeHtml(activeAnalysis.summary || 'Nenhum resumo adicional encontrado no log.')}</p>
                 <p><strong>Primeiro erro tÃ©cnico:</strong> ${escapeHtml(activeAnalysis.firstTechnicalError || activeAnalysis.summary || 'Nenhum erro tÃ©cnico adicional encontrado no log.')}</p>
@@ -1600,15 +1655,16 @@ async function processFiles(files) {
     if (emptyState) emptyState.remove();
 
     const loadingId = 'loading-' + Date.now();
-    container.insertAdjacentHTML('afterbegin', `<div id="${loadingId}" style="text-align:center; padding: 20px; color: var(--color-primary); font-weight: 500;">A extrair ${files.length} arquivo(s)... ⚡</div>`);
+    container.insertAdjacentHTML('afterbegin', `<div id="${loadingId}" class="loading-state">${lucideIcon('loader-circle', 18, 'spin')}<span>A extrair ${files.length} arquivo(s)...</span></div>`);
     const loadingEl = document.getElementById(loadingId);
+    const loadingText = loadingEl?.querySelector('span');
 
-    const updateLoading = (text) => { if (loadingEl) loadingEl.textContent = text; };
+    const updateLoading = (text) => { if (loadingText) loadingText.textContent = text; };
 
     // defensive: capture unhandled rejections while processing
     const onUnhandledRejection = (ev) => {
         console.error('Unhandled promise rejection during processing:', ev.reason);
-        if (loadingEl) loadingEl.textContent = 'Erro interno durante a extração (ver console).';
+        if (loadingText) loadingText.textContent = 'Erro interno durante a extração (ver console).';
     };
     window.addEventListener('unhandledrejection', onUnhandledRejection);
 
@@ -1628,8 +1684,8 @@ async function processFiles(files) {
                 console.warn(`Nenhum arquivo HTML encontrado dentro do ZIP: ${file.name}`);
                 htmlFinal += `
                 <div class="file-report report-failed">
-                    <h3 class="file-header">⚠️ Arquivo sem HTML: ${file.name}</h3>
-                    <p style="padding: 10px; color: var(--status-warning); font-size: 0.9rem;">Nenhum arquivo HTML foi localizado dentro do pacote ZIP. Verifique se o export do FVP contém o arquivo HTML principal.</p>
+                    <h3 class="file-header file-header-warning"><span class="file-title">${lucideIcon('triangle-alert', 20)} Arquivo sem HTML: ${file.name}</span></h3>
+                    <p class="file-error-text">Nenhum arquivo HTML foi localizado dentro do pacote ZIP. Verifique se o export do FVP contém o arquivo HTML principal.</p>
                 </div>`;
                 continue;
             }
@@ -1655,8 +1711,8 @@ async function processFiles(files) {
             console.error(`Erro no arquivo ${file.name}:`, error);
             htmlFinal += `
             <div class="file-report report-failed">
-                <h3 class="file-header">❌ Falha ao processar o arquivo: ${file.name}</h3>
-                <p style="padding: 10px; color: var(--status-warning); font-size: 0.9rem;">
+                <h3 class="file-header file-header-error"><span class="file-title">${lucideIcon('circle-x', 20)} Falha ao processar o arquivo: ${file.name}</span></h3>
+                <p class="file-error-text">
                     Erro técnico na extração do log. <br>
                     <strong>Detalhe:</strong> ${error && error.message ? error.message : String(error)}
                 </p>
@@ -2354,15 +2410,15 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     const hasDetectedCnpj = !!(meta.cnpj && meta.cnpj !== "Não encontrado");
     
     const resolutionHintHtml = meta.authServerResolution === 'endpoint-definitive-match'
-        ? `<div class="resolution-hint" style="background: rgba(33, 150, 243, 0.1); color: #2196f3; padding: 8px; border-radius: 4px; font-size: 0.85rem; margin-bottom: 12px; border: 1px solid rgba(33, 150, 243, 0.3);">🔍 <strong>Validação Exata:</strong> Marca isolada com precisão no momento do handshake (GetAuthServerFromParticipantsEndpoint).</div>`
+        ? `<div class="resolution-hint exact">${lucideIcon('search', 16)} <strong>Validação Exata:</strong> Marca isolada com precisão no momento do handshake (GetAuthServerFromParticipantsEndpoint).</div>`
         : meta.authServerResolution === 'endpoint-match' 
         ? `<div class="resolution-hint">Marca resolvida pelo endpoint exercitado no teste: <strong>${meta.authServerIssuer}</strong></div>`
         : "";
 
     // Ícones SVG Vetorizados
-    const iconSuccess = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-success)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-    const iconError = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-danger)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
-    const iconWarning = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--status-warning)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;"><path d="M12 9v4"></path><path d="M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>`;
+    const iconSuccess = lucideIcon('check', 20);
+    const iconError = lucideIcon('x', 20);
+    const iconWarning = lucideIcon('triangle-alert', 20);
     const validationIcons = { success: iconSuccess, error: iconError, warning: iconWarning };
 
     const safeAlias = meta.alias && meta.alias !== "Não encontrado" ? meta.alias.toLowerCase() : "";
@@ -2410,11 +2466,11 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             validacaoHtml = `
             <div class="validation-box warning">
                 ${iconWarning}
-                <div><strong>Estrutura PF — Observação:</strong> Campos detectados (${vazados.join(' e ')}), porém não caracterizam falha em testes PF.${pfStructuralFailureIgnored ? "<br><span style='color: var(--status-warning); font-size: 0.85rem; margin-top: 4px; display: block;'>Falha estrutural do FVP por campo PJ ausente foi tratada como falso positivo de PF.</span>" : ""}</div>
+                <div><strong>Estrutura PF — Observação:</strong> Campos detectados (${vazados.join(' e ')}), porém não caracterizam falha em testes PF.${pfStructuralFailureIgnored ? "<span class='validation-note'>Falha estrutural do FVP por campo PJ ausente foi tratada como falso positivo de PF.</span>" : ""}</div>
             </div>`;
         } else {
-            let avisoExtra = (temCnpj && isCustomDataUnique) ? "<br><span style='color: var(--status-warning); font-size: 0.85rem; margin-top: 4px; display: block;'>⚠️ <b>Auditoria Automática:</b> A tag 'brazilCnpj' foi detectada no log, mas ignorada pela regra de exceção do teste <i>customer_data_unique</i>.</span>" : "";
-            if (pfStructuralFailureIgnored) avisoExtra += "<br><span style='color: var(--status-warning); font-size: 0.85rem; margin-top: 4px; display: block;'>Falha estrutural do FVP por campo PJ ausente foi tratada como falso positivo de PF.</span>";
+            let avisoExtra = (temCnpj && isCustomDataUnique) ? `<span class='validation-note'>${lucideIcon('triangle-alert', 16)} <span><b>Auditoria Automática:</b> A tag 'brazilCnpj' foi detectada no log, mas ignorada pela regra de exceção do teste <i>customer_data_unique</i>.</span></span>` : "";
+            if (pfStructuralFailureIgnored) avisoExtra += "<span class='validation-note'>Falha estrutural do FVP por campo PJ ausente foi tratada como falso positivo de PF.</span>";
             validacaoHtml = `
             <div class="validation-box success">
                 ${iconSuccess}
@@ -2470,7 +2526,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             validacaoInstHtml = `
             <div class="validation-box success">
                 ${iconSuccess}
-                <div><strong>AS-ID Validado:</strong> O log pertence à marca <b>${transmissoraEncontrada.nome}</b> (AS-ID: ${logAsId})<br><span class="validation-detail">Endpoint base usado na identificação: ${meta.authServerIssuer}</span><br><span style="color: var(--status-warning); font-size: 0.85rem;">⚠️ Nota: O nome no log ("${logNome}") difere do nome cadastrado.</span></div>
+                <div><strong>AS-ID Validado:</strong> O log pertence à marca <b>${transmissoraEncontrada.nome}</b> (AS-ID: ${logAsId})<br><span class="validation-detail">Endpoint base usado na identificação: ${meta.authServerIssuer}</span><span class="validation-note">${lucideIcon('triangle-alert', 16)} Nota: O nome no log ("${logNome}") difere do nome cadastrado.</span></div>
             </div>`;
         }
         meta.institutionName = transmissoraEncontrada.nome;
@@ -2556,12 +2612,12 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
 
     let html = `
     <div class="file-report ${borderStatusClass}" data-status="${dataStatus}">
-        <h3 class="file-header" style="justify-content: space-between;">
-            <div style="display:flex; align-items:center;">
-                📄 ${fileName} 
-                <span class="badge badge-${resolvedIsPF ? 'pf' : resolvedIsPJ ? 'pj' : 'neutral'}" style="margin-left: 12px;">${tipoTesteLabel}</span>
+        <h3 class="file-header">
+            <div class="file-title">
+                ${lucideIcon('file-text', 20)} ${fileName}
+                <span class="badge badge-${resolvedIsPF ? 'pf' : resolvedIsPJ ? 'pj' : 'neutral'}">${tipoTesteLabel}</span>
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+            <div class="card-actions">
                 <a href="${htmlBlobUrl}" target="_blank" class="btn-view-log">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                     Abrir Log
@@ -2613,8 +2669,8 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
                 if (img.isPdf) {
                     galeriaHtml += `
                     <div class="evidence-item">
-                        <a href="${img.url}" target="_blank" style="display:flex; align-items:center; justify-content:center; width:90px; height:90px; background:#29292E; border-radius:6px; text-decoration:none; border: 1px solid var(--border-color); transition: 0.2s;" onmouseover="this.style.borderColor='#8257E5'" onmouseout="this.style.borderColor='var(--border-color)'">
-                            <span style="font-size: 1.8rem;">📄</span>
+                        <a href="${img.url}" target="_blank" class="evidence-file" aria-label="Abrir ${img.nome}">
+                            ${lucideIcon('file-text', 20)}
                         </a>
                         <span class="evidence-name">${img.nome}</span>
                     </div>`;
@@ -2632,11 +2688,11 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
 
         html += `
             <div class="checklist-box ${cssClass}">
-                <strong>📸 Auditoria de Evidências Anexadas:</strong>
-                <ul style="margin-bottom: ${evidencias.imagens.length > 0 ? '16px' : '0'}">
-                    <li style="color: ${c.saldo ? 'var(--status-success)' : 'var(--text-muted)'}">${c.saldo ? iconSuccess : iconError} Comprovante de Saldo</li>
-                    <li style="color: ${c.versaoApp ? 'var(--status-success)' : 'var(--text-muted)'}">${c.versaoApp ? iconSuccess : iconError} Captura da Versão do App</li>
-                    <li style="color: ${c.erro ? 'var(--status-success)' : 'var(--text-muted)'}">${c.erro ? iconSuccess : iconError} Evidência do Erro</li>
+                <strong class="checklist-title">${lucideIcon('camera', 18)} Auditoria de Evidências Anexadas:</strong>
+                <ul class="${evidencias.imagens.length > 0 ? 'has-gallery' : ''}">
+                    <li class="${c.saldo ? 'checklist-ok' : 'checklist-missing'}">${c.saldo ? iconSuccess : iconError} Comprovante de Saldo</li>
+                    <li class="${c.versaoApp ? 'checklist-ok' : 'checklist-missing'}">${c.versaoApp ? iconSuccess : iconError} Captura da Versão do App</li>
+                    <li class="${c.erro ? 'checklist-ok' : 'checklist-missing'}">${c.erro ? iconSuccess : iconError} Evidência do Erro</li>
                 </ul>
                 ${galeriaHtml}
             </div>
@@ -2808,9 +2864,9 @@ const TEST_IDENTITY_FIELDS = ['Test ID no link', 'Test_ID', 'Teste principal'];
 document.body.insertAdjacentHTML('beforeend', `
 <div id="testMismatchModal" class="operational-modal test-mismatch-modal" role="alertdialog" aria-modal="true" aria-labelledby="testMismatchTitle" aria-hidden="true">
     <div class="operational-modal-card test-mismatch-card">
-        <button type="button" class="operational-modal-close" data-mismatch-close aria-label="Fechar">&times;</button>
+        <button type="button" class="operational-modal-close" data-mismatch-close aria-label="Fechar">${lucideIcon('x', 20)}</button>
         <div class="test-mismatch-head">
-            <span class="test-mismatch-icon">✖</span>
+            <span class="test-mismatch-icon">${lucideIcon('x', 20)}</span>
             <div>
                 <h2 id="testMismatchTitle">Teste divergente</h2>
                 <p>O teste conferido no SIGC não é o mesmo que foi executado no log. Confira antes de seguir com o preenchimento.</p>
@@ -2914,7 +2970,7 @@ function renderSigcResult(container, payload, result) {
     const nextStep = hasError
         ? 'Revise as divergências antes de seguir com o preenchimento no SIGC.'
         : 'O pop-up do teste ficou aberto no SIGC para você seguir com o preenchimento.';
-    const icon = { success: '✔', error: '✖', warning: '!', neutral: '–' };
+    const icon = { success: lucideIcon('check', 16), error: lucideIcon('x', 16), warning: lucideIcon('triangle-alert', 16), neutral: lucideIcon('minus', 16) };
 
     const f = result.fields;
     const isGroup = payload.module === 'grupo';
@@ -2926,7 +2982,7 @@ function renderSigcResult(container, payload, result) {
         f.status && `Status: <strong>${escapeHtml(f.status)}</strong>`,
         f.resultado && `Resultado: <strong>${escapeHtml(f.resultado)}</strong>`,
         f.responsavel && `Responsável: <strong>${escapeHtml(f.responsavel)}</strong>`,
-        result.rowsFound > 1 && `<span style="color: var(--status-warning);">${result.rowsFound} testes com este SD no SIGC; usado o de teste principal mais parecido.</span>`
+        result.rowsFound > 1 && `<span class="sigc-extra-note">${result.rowsFound} testes com este SD no SIGC; usado o de teste principal mais parecido.</span>`
     ].filter(Boolean).join(' · ');
 
     // Texto padrão com os links de evidência preenchidos no pop-up (1 a 3), para a resposta no Service Desk.
@@ -2940,12 +2996,12 @@ function renderSigcResult(container, payload, result) {
                     <pre class="sigc-evidence-text">${escapeHtml(evidenceText)}</pre>
                 </div>` : `
                 <div class="sigc-evidence validation-detail">
-                    Nenhum link de evidência encontrado no pop-up.${f.evidenciasDiag ? ` [Diagnóstico: ${escapeHtml(f.evidenciasDiag)}]` : ' Atualize a extensão (↻ em chrome://extensions) e tente de novo.'}
+                    Nenhum link de evidência encontrado no pop-up.${f.evidenciasDiag ? ` [Diagnóstico: ${escapeHtml(f.evidenciasDiag)}]` : ` Atualize a extensão (${lucideIcon('rotate-cw', 16)} em chrome://extensions) e tente de novo.`}
                 </div>`;
 
     container.innerHTML = `
         <div class="validation-box ${overall} sigc-result-box">
-            <div style="width: 100%;">
+            <div class="sigc-result-body">
                 <strong>Correlação SIGC ${{ grupo: 'Qualidade', execucao: 'Execução de Testes' }[result.page] || 'Retestes'}${isGroup ? ' (grupo)' : ''}:</strong> ${title}
                 <table class="sigc-compare-table">
                     <thead><tr><th></th><th>Campo</th><th>Log (FVP)</th><th>SIGC</th></tr></thead>
@@ -2959,10 +3015,10 @@ function renderSigcResult(container, payload, result) {
                             </tr>`).join('')}
                     </tbody>
                 </table>
-                ${extra ? `<div class="validation-detail" style="margin-top: 8px;">${extra}</div>` : ''}
+                ${extra ? `<div class="validation-detail sigc-extra">${extra}</div>` : ''}
                 ${evidenceHtml}
                 ${isGroup && f.campos?.length ? `
-                    <details class="validation-detail" style="margin-top: 8px;">
+                    <details class="validation-detail sigc-extra">
                         <summary>Todos os campos lidos do pop-up (${f.campos.length})</summary>
                         ${f.campos.map(c => `<div>${escapeHtml(c.label)}: <strong>${escapeHtml(c.valor || '—')}</strong></div>`).join('')}
                     </details>` : ''}

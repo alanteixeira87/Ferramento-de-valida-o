@@ -6,7 +6,12 @@
     <title>QA Analytics - SIGC</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // Aplica o tema escolhido antes da primeira pintura (sem escolha salva, segue o sistema operacional).
+        try { const t = localStorage.getItem('qa-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="daily-report.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -14,6 +19,7 @@
 <body>
 
     <div id="loginScreen" class="login-wrapper">
+        <button type="button" class="btn-outline theme-toggle theme-toggle-login" data-theme-toggle>Tema</button>
         <div class="login-shell">
             <section class="login-brand-panel">
                 <div class="login-brand-content">
@@ -51,7 +57,7 @@
                             <input type="password" id="passwordInput" placeholder="Digite a senha..." required>
                         </div>
                         <button type="submit" class="btn-primary w-full">Entrar no dashboard</button>
-                        <p id="loginError" style="color: var(--status-danger); display:none; margin-top: 10px; font-size: 0.85rem; text-align: center;">Senha incorreta. Tente novamente.</p>
+                        <p id="loginError" class="login-error">Senha incorreta. Tente novamente.</p>
                     </form>
                 </div>
             </section>
@@ -84,6 +90,7 @@
                 </button>
             </nav>
             <div class="sidebar-footer">
+                <button type="button" class="btn-outline w-full theme-toggle" data-theme-toggle>Tema</button>
                 <button id="logoutBtn" class="btn-outline w-full">Sair do sistema</button>
             </div>
         </aside>
@@ -93,7 +100,7 @@
             <div id="viewTests" class="view-section active">
                 <header class="topbar">
                     <h2>Auditoria de logs FVP</h2>
-                    <p style="color: var(--text-muted); font-size: 0.9rem;">Importe os arquivos ZIP exportados para validação automática.</p>
+                    <p>Importe os arquivos ZIP exportados para validação automática.</p>
                 </header>
 
                 <section class="upload-section">
@@ -107,11 +114,11 @@
                     </div>
                     <div class="drop-zone" id="dropZone">
                         <div class="drop-zone-content">
-                            <span style="font-size: 2.5rem; margin-bottom: 12px; display: block;">📂</span>
-                            <h3 style="color: var(--text-title);">Arraste os arquivos .zip para cá</h3>
+                            <span class="drop-zone-icon"><svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></span>
+                            <h3>Arraste os arquivos .zip para cá</h3>
                             <p>ou clique para selecionar do seu computador</p>
                             <input type="file" id="fileInput" accept=".zip" multiple style="display: none;">
-                            <button id="uploadBtn" class="btn-primary" style="margin-top: 16px;">Selecionar arquivos</button>
+                            <button id="uploadBtn" class="btn-primary">Selecionar arquivos</button>
                         </div>
                     </div>
                 </section>
@@ -120,8 +127,8 @@
                     <div class="results-header" id="resultsHeader" style="display: none;">
                         <div class="scoreboard">
                             <button class="filter-btn active" data-filter="all">Total: <strong id="countAll">0</strong></button>
-                            <button class="filter-btn success" data-filter="passed"><span style="color: var(--status-success);">●</span> Sucessos: <strong id="countPassed">0</strong></button>
-                            <button class="filter-btn danger" data-filter="failed"><span style="color: var(--status-danger);">●</span> Falhas: <strong id="countFailed">0</strong></button>
+                            <button class="filter-btn success" data-filter="passed"><span class="status-dot success" aria-hidden="true"></span> Sucessos: <strong id="countPassed">0</strong></button>
+                            <button class="filter-btn danger" data-filter="failed"><span class="status-dot danger" aria-hidden="true"></span> Falhas: <strong id="countFailed">0</strong></button>
                         </div>
                         <div class="results-actions">
                         <button id="sigcCheckAllBtn" class="btn-outline" title="Busca cada teste no SIGC Retestes pelo SD Ticket e compara os dados">Conferir todos no SIGC</button>
@@ -218,7 +225,7 @@
             <div id="viewDocs" class="view-section">
                 <header class="topbar">
                     <h2>Base de conhecimento e documentação</h2>
-                    <p style="color: var(--text-muted); font-size: 0.9rem;">Entenda as regras de negócio e as validações da ferramenta.</p>
+                    <p>Entenda as regras de negócio e as validações da ferramenta.</p>
                 </header>
 
                 <div class="docs-content">
@@ -258,7 +265,7 @@
                     </div>
 
                     <div class="docs-card highlight-card">
-                        <h3 style="color: var(--status-warning);">5. Exceção de regra: Customer Data Unique</h3>
+                        <h3>5. Exceção de regra: Customer Data Unique</h3>
                         <p>O plano <strong><code>customer_data_unique</code></strong> pode trazer a expressão <code>brazilCnpj</code> em trechos técnicos do próprio fluxo, especialmente na mensagem <code>AddProductTypeToPhase2Config - brazilCnpj is empty, setting product type to Personal</code>.</p>
                         <p><strong>Tratamento aplicado:</strong> essa ocorrência específica é desconsiderada pela ferramenta para que a leitura não gere um falso positivo de estrutura PJ em cenários PF.</p>
                         <p>Com isso, a validação continua ativa para ocorrências reais de <code>BrazilCNPJ</code>, mas ignora a mensagem técnica de configuração que não representa vazamento de dado estrutural.</p>
