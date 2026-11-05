@@ -25,6 +25,9 @@ code {
 .tabular { font-variant-numeric: tabular-nums; }
 
 /* ================== LOGIN ================== */
+/* Sessão ativa (F5): o head já marca o <html>, então o login não chega a aparecer. */
+:root[data-session="active"] #loginScreen { display: none !important; }
+:root[data-session="active"] #mainApp { display: flex !important; }
 .login-wrapper {
     display: flex;
     justify-content: center;
@@ -728,6 +731,14 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .sigc-extra { margin-top: 8px; }
 .sigc-extra-note { color: var(--pendente-texto); }
 .btn-sigc-focus { cursor: pointer; }
+.sigc-next-step > span { flex: 1; }
+.sigc-next-step { justify-content: flex-end; }
+.sigc-blocked {
+    display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; padding: 14px 18px;
+    border: 1px solid var(--falha-borda); border-radius: var(--raio-lg);
+    background: var(--superficie); color: var(--falha-texto); font-size: var(--fs-sm);
+}
+.sigc-blocked > .icon { margin-top: 1px; }
 .sigc-evidence { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--borda); display: grid; gap: 6px; font-size: var(--fs-sm); color: var(--texto); }
 .sigc-evidence-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .sigc-evidence-text { margin: 0; padding: 10px 12px; border: 1px solid var(--borda); border-radius: var(--raio-sm); background: var(--superficie); color: var(--texto); white-space: pre-wrap; word-break: break-all; font-family: var(--fonte-mono); font-size: var(--fs-xs); }

@@ -18,7 +18,9 @@ const LUCIDE_ICONS = {
     'rotate-cw': '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
     'grip-vertical': '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
     'sun': '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
-    'moon': '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'
+    'moon': '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+    'lock': '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    'external-link': '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'
 };
 function lucideIcon(name, size = 18, extraClass = '') {
     return `<svg class="icon ${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LUCIDE_ICONS[name]}</svg>`;
@@ -72,13 +74,27 @@ const viewStateDashboard = document.getElementById('viewStateDashboard');
 const viewDocs = document.getElementById('viewDocs');
 const viewDailyReport = document.getElementById('viewDailyReport');
 
+// A sessão vale para a aba atual: sobrevive ao F5 e termina ao fechar a aba ou sair do sistema.
+const SESSION_KEY = 'qa-session';
+const ACTIVE_VIEW_KEY = 'qa-active-view';
+
+function setSessionActive(active) {
+    try {
+        if (active) sessionStorage.setItem(SESSION_KEY, '1');
+        else { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(ACTIVE_VIEW_KEY); }
+    } catch (e) {}
+    if (active) document.documentElement.dataset.session = 'active';
+    else delete document.documentElement.dataset.session;
+}
+
 if(loginForm) {
     loginForm.addEventListener('submit', (e) => {
-        e.preventDefault(); 
+        e.preventDefault();
         if (passwordInput.value === "admin123") {
+            setSessionActive(true);
             loginScreen.style.display = 'none';
             mainApp.style.display = 'flex';
-            passwordInput.value = ''; 
+            passwordInput.value = '';
             loginError.style.display = 'none';
         } else {
             loginError.style.display = 'block';
@@ -89,6 +105,8 @@ if(loginForm) {
 
 if(logoutBtn) {
     logoutBtn.addEventListener('click', () => {
+        setSessionActive(false);
+        setActiveView('tests');
         mainApp.style.display = 'none';
         loginScreen.style.display = 'flex';
     });
@@ -96,6 +114,9 @@ if(logoutBtn) {
 
 function setActiveView(activeView) {
     if (activeView === 'state-dashboard') activeView = 'tests';
+    if (document.documentElement.dataset.session === 'active') {
+        try { sessionStorage.setItem(ACTIVE_VIEW_KEY, activeView); } catch (e) {}
+    }
 
     [btnNavTests, btnNavStateDashboard, btnNavDocs, btnNavDailyReport].forEach(btn => btn?.classList.remove('active'));
     [viewTests, viewStateDashboard, viewDocs, viewDailyReport].forEach(view => view?.classList.remove('active'));
@@ -120,6 +141,15 @@ if(btnNavTests && btnNavDocs && viewTests && viewDocs) {
     btnNavStateDashboard?.addEventListener('click', () => setActiveView('state-dashboard'));
     btnNavDocs.addEventListener('click', () => setActiveView('docs'));
     btnNavDailyReport?.addEventListener('click', () => setActiveView('daily-report'));
+}
+
+// Após F5 com sessão ativa: volta direto ao dashboard, na mesma tela em que o analista estava.
+if (document.documentElement.dataset.session === 'active') {
+    loginScreen.style.display = 'none';
+    mainApp.style.display = 'flex';
+    let savedView = null;
+    try { savedView = sessionStorage.getItem(ACTIVE_VIEW_KEY); } catch (e) {}
+    if (['tests', 'daily-report', 'docs'].includes(savedView)) setActiveView(savedView);
 }
 
 // -------------------------------------------------------------
@@ -2709,6 +2739,8 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
 // -------------------------------------------------------------
 // Módulos do SIGC onde o pop-up aberto pode ser lido (mesmas chaves da extensão).
 const SIGC_READ_PAGES = { retestes: 'Reteste', grupo: 'Qualidade', execucao: 'Execução' };
+// Lista de chamados do Service Desk do Open Finance, onde o reteste é respondido.
+const SERVICE_DESK_URL = 'https://servicedesk.openfinancebrasil.org.br/HelpDesk.jsp?fromId=List&showFirstPage=true';
 const sigcPayloads = {};
 const sigcPendingRequests = {};
 let sigcPayloadSeq = 0;
@@ -2717,20 +2749,31 @@ function isSigcMissing(value) {
     return !value || /^n.{1,3}o encontrado$/i.test(String(value).trim());
 }
 
-// Retestes podem ter mais de um SD Ticket ("245699, 243070"): vale o primeiro, antes da vírgula.
+// Retestes podem ter mais de um SD Ticket ("245699, 243070"): lista todos, sem repetir.
+function sdTicketList(value) {
+    return [...new Set(String(value ?? '').split(/[,;/|\s]+/).map(part => part.replace(/\D/g, '')).filter(Boolean))];
+}
+
 function primarySdTicket(value) {
-    return String(value ?? '').split(/[,;/|]/)[0].replace(/\D/g, '');
+    return sdTicketList(value)[0] || '';
+}
+
+// "001" e "1" são o mesmo SD.
+function sameSdTicket(a, b) {
+    return String(a).replace(/^0+(?=\d)/, '') === String(b).replace(/^0+(?=\d)/, '');
 }
 
 // Sem SD Ticket = teste de grupo: conferido pelo pop-up aberto na tela de Qualidade do SIGC.
 function registerSigcPayload(payload) {
-    if (isSigcMissing(payload.sdTicket) || !primarySdTicket(payload.sdTicket)) {
+    const tickets = sdTicketList(payload.sdTicket);
+    if (isSigcMissing(payload.sdTicket) || !tickets.length) {
         payload.module = 'grupo';
         payload.sdTicket = '';
     } else {
         payload.module = 'retestes';
         payload.sdTicketOriginal = payload.sdTicket;
-        payload.sdTicket = primarySdTicket(payload.sdTicket);
+        payload.sdTickets = tickets;
+        payload.sdTicket = tickets[0];
     }
     const id = `sigc${++sigcPayloadSeq}`;
     sigcPayloads[id] = payload;
@@ -2785,12 +2828,18 @@ function compareSigcFields(payload, sigc) {
         checks.push({ label, logValue, sigcValue, status: matches ? 'success' : level, mismatch: !matches });
     };
 
-    add('SD Ticket', payload.sdTicket, sigc.serviceDesk, (a, b) => primarySdTicket(a) === primarySdTicket(b));
-    if (payload.sdTicketOriginal && payload.sdTicketOriginal.trim() !== payload.sdTicket) {
-        checks[checks.length - 1].logValue = `${payload.sdTicket} (no log: ${payload.sdTicketOriginal})`;
+    // Log com vários SDs: confere se o SD do SIGC é qualquer um deles (SIGC 002 e log "001, 002" aprova).
+    const logTickets = payload.sdTickets?.length ? payload.sdTickets : sdTicketList(payload.sdTicket);
+    const matchedSd = sdTicketList(sigc.serviceDesk).find(sd => logTickets.some(logSd => sameSdTicket(logSd, sd)));
+    add('SD Ticket', payload.sdTicket, sigc.serviceDesk, () => Boolean(matchedSd));
+    const sdCheck = checks[checks.length - 1];
+    if (sdCheck.status === 'success') {
+        // SD confirmado no SIGC: botão para copiar o número e colar no Service Desk.
+        sdCheck.copyText = matchedSd;
+        if (logTickets.length > 1) sdCheck.logValue = `${matchedSd} (no log: ${logTickets.join(', ')})`;
+    } else if (logTickets.length > 1 && sdCheck.status !== 'neutral') {
+        sdCheck.logValue = `${logTickets.join(', ')} (nenhum confere com o SIGC)`;
     }
-    // SD confirmado no SIGC: botão para copiar o número e colar no Service Desk.
-    if (checks[checks.length - 1].status === 'success') checks[checks.length - 1].copyText = payload.sdTicket;
     // Ciclo: só exibido na tela (log x SIGC), sem marcar como certo ou errado.
     checks.push({ label: 'Ciclo', logValue: isSigcMissing(payload.cycle) ? 'Não disponível no log' : payload.cycle, sigcValue: sigc.ciclo || 'Não encontrado no SIGC', status: 'neutral' });
     add('AS-ID', payload.asId, sigc.asId, (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase());
@@ -2967,9 +3016,43 @@ function renderSigcResult(container, payload, result) {
     const title = hasError
         ? 'Divergência entre o log e o SIGC'
         : hasWarning ? 'Correlação OK com observações' : 'Tudo OK: o teste no SIGC confere com o log';
-    const nextStep = hasError
-        ? 'Revise as divergências antes de seguir com o preenchimento no SIGC.'
-        : 'O pop-up do teste ficou aberto no SIGC para você seguir com o preenchimento.';
+    // Reteste validado segue para a resposta no Service Desk; Qualidade e Execução voltam ao SIGC.
+    const sigcModule = result.page || payload.module;
+    const isReteste = sigcModule === 'retestes';
+    // Reteste com divergência fica bloqueado: sem texto para copiar e sem Service Desk até uma nova conferência sem erro.
+    const serviceDeskBlocked = isReteste && hasError;
+    const divergentLabels = checks.filter(check => check.status === 'error').map(check => check.label);
+    // SD que o analista leva para o Service Desk: sempre o do SIGC, já validado contra o log.
+    // O SD do log só serve para a validação; sem SD no SIGC, nada é copiado.
+    const confirmedSd = checks.find(check => check.label === 'SD Ticket' && check.status === 'success')?.copyText || '';
+    const goToSigcButton = `<button type="button" class="btn-view-log btn-sigc-focus" data-sigc-module="${sigcModule}">Ir para o SIGC</button>`;
+    const nextStep = serviceDeskBlocked
+        ? 'Depois de corrigir no SIGC, clique de novo em Ler Reteste (ou Conferir no SIGC) para liberar o Service Desk.'
+        : hasError
+            ? 'Revise as divergências antes de seguir com o preenchimento no SIGC.'
+            : isReteste
+                ? confirmedSd
+                    ? `Copie o texto acima e responda o chamado no Service Desk. Ao clicar em Ir para o Service Desk, o SD ${confirmedSd} do SIGC já vai copiado para colar na busca.`
+                    : 'Copie o texto acima e responda o chamado no Service Desk. O SIGC não informou o SD Ticket, então nenhum SD é copiado.'
+                : 'O pop-up do teste ficou aberto no SIGC para você seguir com o preenchimento.';
+    const nextStepButton = serviceDeskBlocked
+        ? `${goToSigcButton}
+                    <button type="button" class="btn-view-log" disabled title="Bloqueado até as divergências serem corrigidas no SIGC">${lucideIcon('lock', 16)} Ir para o Service Desk</button>`
+        : isReteste
+            ? confirmedSd
+                ? `<a class="btn-view-log btn-service-desk" href="${SERVICE_DESK_URL}" target="_blank" rel="noopener noreferrer" data-copy-text="${escapeHtml(confirmedSd)}" title="Copia o SD ${escapeHtml(confirmedSd)} do SIGC e abre o Service Desk">${lucideIcon('external-link', 16)} Ir para o Service Desk</a>`
+                : `<a class="btn-view-log" href="${SERVICE_DESK_URL}" target="_blank" rel="noopener noreferrer">${lucideIcon('external-link', 16)} Ir para o Service Desk</a>`
+            : goToSigcButton;
+    const blockedHtml = serviceDeskBlocked ? `
+                <div class="sigc-blocked" role="alert">
+                    ${lucideIcon('lock', 18)}
+                    <div>
+                        <strong>Validação bloqueada.</strong>
+                        ${divergentLabels.length === 1 ? 'O campo' : 'Os campos'} <strong>${divergentLabels.map(escapeHtml).join(', ')}</strong>
+                        ${divergentLabels.length === 1 ? 'diverge' : 'divergem'} entre o log e o SIGC. Verifique os dados destacados na tabela e corrija no SIGC
+                        antes de responder o chamado: a resposta e o Service Desk ficam bloqueados até a próxima conferência sem divergência.
+                    </div>
+                </div>` : '';
     const icon = { success: lucideIcon('check', 16), error: lucideIcon('x', 16), warning: lucideIcon('triangle-alert', 16), neutral: lucideIcon('minus', 16) };
 
     const f = result.fields;
@@ -2986,8 +3069,8 @@ function renderSigcResult(container, payload, result) {
     ].filter(Boolean).join(' · ');
 
     // Texto padrão com os links de evidência preenchidos no pop-up (1 a 3), para a resposta no Service Desk.
-    const evidenceText = buildEvidenceReply(payload, f);
-    const evidenceHtml = evidenceText ? `
+    const evidenceText = buildEvidenceReply({ ...payload, sdTicket: confirmedSd }, f);
+    const evidenceHtml = serviceDeskBlocked ? '' : evidenceText ? `
                 <div class="sigc-evidence">
                     <div class="sigc-evidence-head">
                         <strong>Resposta para o Service Desk</strong>
@@ -3016,6 +3099,7 @@ function renderSigcResult(container, payload, result) {
                     </tbody>
                 </table>
                 ${extra ? `<div class="validation-detail sigc-extra">${extra}</div>` : ''}
+                ${blockedHtml}
                 ${evidenceHtml}
                 ${isGroup && f.campos?.length ? `
                     <details class="validation-detail sigc-extra">
@@ -3024,7 +3108,7 @@ function renderSigcResult(container, payload, result) {
                     </details>` : ''}
                 <div class="sigc-next-step">
                     <span>${nextStep}</span>
-                    <button type="button" class="btn-view-log btn-sigc-focus" data-sigc-module="${result.page || payload.module}">Ir para o SIGC</button>
+                    ${nextStepButton}
                 </div>
             </div>
         </div>`;
@@ -3051,13 +3135,26 @@ async function runSigcCheck(button, readOnly = false) {
     button.textContent = readOnly ? 'Lendo pop-up...' : 'Consultando SIGC...';
     container.hidden = false;
     const page = button.dataset.sigcPage;
-    const testLabel = payload.sdTicket ? `do SD ${escapeHtml(payload.sdTicket)}` : 'do teste de grupo';
-    container.innerHTML = readOnly
-        ? `<div class="resolution-hint">Lendo o pop-up ${testLabel} aberto no SIGC ${SIGC_READ_PAGES[page] || ''}...</div>`
-        : `<div class="resolution-hint">Buscando SD ${escapeHtml(payload.sdTicket)} no SIGC Retestes...</div>`;
 
-    const result = await requestSigcCheck(readOnly ? { ...payload, readOnly: true, page } : payload);
-    renderSigcResult(container, payload, result);
+    // Log com vários SDs: tenta cada um, na ordem do log, até o SIGC reconhecer o teste.
+    const candidates = payload.module === 'retestes' && payload.sdTickets?.length ? payload.sdTickets : [payload.sdTicket];
+    let result;
+    let attempt = payload;
+    for (let i = 0; i < candidates.length; i++) {
+        attempt = { ...payload, sdTicket: candidates[i] };
+        const testLabel = attempt.sdTicket ? `do SD ${escapeHtml(attempt.sdTicket)}` : 'do teste de grupo';
+        const progress = candidates.length > 1 ? ` (${i + 1} de ${candidates.length} SDs do log)` : '';
+        container.innerHTML = readOnly
+            ? `<div class="resolution-hint">Lendo o pop-up ${testLabel} aberto no SIGC ${SIGC_READ_PAGES[page] || ''}${progress}...</div>`
+            : `<div class="resolution-hint">Buscando SD ${escapeHtml(attempt.sdTicket)} no SIGC Retestes${progress}...</div>`;
+        result = await requestSigcCheck(readOnly ? { ...attempt, readOnly: true, page } : attempt);
+        // Na leitura, o pop-up aberto pode ser de outro SD do log; na busca, só tenta o próximo se não achou.
+        if (result?.ok || !(readOnly || result?.notFound)) break;
+    }
+    if (!result?.ok && candidates.length > 1) {
+        result = { ...result, error: `${result?.error || 'Falha desconhecida na consulta.'} SDs do log procurados: ${candidates.join(', ')}.` };
+    }
+    renderSigcResult(container, attempt, result);
 
     button.disabled = false;
     button.innerHTML = originalLabel;
@@ -3074,10 +3171,17 @@ document.getElementById('resultsContainer')?.addEventListener('click', event => 
     }
     const copyButton = event.target.closest('.btn-sigc-copy');
     if (copyButton) copySigcText(copyButton);
+    // Ir para o Service Desk: copia o SD confirmado antes de abrir a página, para o analista só colar.
+    const serviceDeskLink = event.target.closest('.btn-service-desk');
+    if (serviceDeskLink) {
+        event.preventDefault();
+        copySigcText(serviceDeskLink, `SD ${serviceDeskLink.dataset.copyText} copiado`)
+            .finally(() => window.open(serviceDeskLink.href, '_blank', 'noopener,noreferrer'));
+    }
 });
 
 // Copia o link (ou todos os links) de evidência; sem acesso ao clipboard, usa um campo temporário.
-async function copySigcText(button) {
+async function copySigcText(button, doneLabel = 'Copiado!') {
     const text = button.dataset.copyText || '';
     try {
         await navigator.clipboard.writeText(text);
@@ -3089,9 +3193,9 @@ async function copySigcText(button) {
         document.execCommand('copy');
         temp.remove();
     }
-    const label = button.textContent;
-    button.textContent = 'Copiado!';
-    setTimeout(() => { button.textContent = label; }, 1500);
+    const label = button.innerHTML;
+    button.textContent = doneLabel;
+    setTimeout(() => { button.innerHTML = label; }, 1500);
 }
 
 document.getElementById('sigcCheckAllBtn')?.addEventListener('click', async event => {

@@ -38,6 +38,13 @@ Se ele estiver hospedado em outro endereço, inclua esse endereço em
    olho (**Verificar**), lê o pop-up e volta para o validador com a comparação.
 5. A extensão não clica em mais nada: o pop-up do teste fica aberto no SIGC. Use o
    botão **Ir para o SIGC** no card para voltar a ele e seguir com o preenchimento.
+   Em teste de **Reteste**, o botão é **Ir para o Service Desk** e abre a lista de chamados
+   (https://servicedesk.openfinancebrasil.org.br/HelpDesk.jsp?fromId=List&showFirstPage=true)
+   em nova aba, para responder o chamado com o texto copiado.
+6. Reteste com divergência (campo marcado como erro) fica **bloqueado**: o texto para o Service
+   Desk não é exibido e o botão **Ir para o Service Desk** fica desabilitado. Corrija os dados no
+   SIGC e clique de novo em **Ler Reteste** (ou **Conferir no SIGC**): a conferência sem divergência
+   libera o Service Desk. Em Qualidade e Execução, o botão continua sendo **Ir para o SIGC**.
 
 ### Leitura do pop-up aberto (Reteste, Qualidade e Execução)
 
@@ -76,6 +83,12 @@ com SD e só na tela de Retestes.
 | Instituição     | marca do AS-ID    | Nome Instituição         | alerta      |
 
 ## Observações
+
+- Log com mais de um SD Ticket (ex.: `001, 002`): o teste é aprovado quando o SD do SIGC é
+  **qualquer um** deles (SIGC `001` ou `002` confere). A busca e a leitura do pop-up tentam cada
+  SD do log, na ordem, até achar o teste. **Ir para o Service Desk** copia o SD **do SIGC** (já
+  validado contra o log) antes de abrir a página, para colar direto na busca do chamado. O SD do
+  log serve só para a validação: se o SIGC não informar o SD, nada é copiado.
 
 - Os filtros da tela do SIGC continuam valendo. Por exemplo, com **Validação = Não**,
   testes já validados não aparecem na lista. Ajuste os filtros de data e

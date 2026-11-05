@@ -10,6 +10,8 @@
     <script>
         // Aplica o tema escolhido antes da primeira pintura (sem escolha salva, segue o sistema operacional).
         try { const t = localStorage.getItem('qa-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+        // Sessão já autenticada nesta aba: abre direto no dashboard após F5, sem mostrar o login.
+        try { if (sessionStorage.getItem('qa-session') === '1') document.documentElement.dataset.session = 'active'; } catch (e) {}
     </script>
     <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="style.css">
