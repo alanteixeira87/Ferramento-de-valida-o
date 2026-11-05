@@ -2725,7 +2725,8 @@ function compareSigcFields(payload, sigc) {
             checks.push({ label, logValue, sigcValue: 'Não encontrado no SIGC', status: 'warning' });
             return;
         }
-        checks.push({ label, logValue, sigcValue, status: comparator(logValue, sigcValue) ? 'success' : level });
+        const matches = comparator(logValue, sigcValue);
+        checks.push({ label, logValue, sigcValue, status: matches ? 'success' : level, mismatch: !matches });
     };
 
     add('SD Ticket', payload.sdTicket, sigc.serviceDesk, (a, b) => primarySdTicket(a) === primarySdTicket(b));
@@ -2801,6 +2802,65 @@ function compareSigcFields(payload, sigc) {
     return checks;
 }
 
+// Campos que identificam o teste: divergência em qualquer um indica que o teste aberto no SIGC não é o executado no log.
+const TEST_IDENTITY_FIELDS = ['Test ID no link', 'Test_ID', 'Teste principal'];
+
+document.body.insertAdjacentHTML('beforeend', `
+<div id="testMismatchModal" class="operational-modal test-mismatch-modal" role="alertdialog" aria-modal="true" aria-labelledby="testMismatchTitle" aria-hidden="true">
+    <div class="operational-modal-card test-mismatch-card">
+        <button type="button" class="operational-modal-close" data-mismatch-close aria-label="Fechar">&times;</button>
+        <div class="test-mismatch-head">
+            <span class="test-mismatch-icon">✖</span>
+            <div>
+                <h2 id="testMismatchTitle">Teste divergente</h2>
+                <p>O teste conferido no SIGC não é o mesmo que foi executado no log. Confira antes de seguir com o preenchimento.</p>
+            </div>
+        </div>
+        <div id="testMismatchList"></div>
+        <div class="test-mismatch-actions">
+            <button type="button" class="btn-view-log" data-mismatch-close>Entendi</button>
+        </div>
+    </div>
+</div>`);
+
+const testMismatchModal = document.getElementById('testMismatchModal');
+const testMismatchList = document.getElementById('testMismatchList');
+
+// No "Conferir todos" as divergências se acumulam no mesmo pop-up até ele ser fechado.
+function showTestMismatchAlert(payload, mismatches) {
+    if (!testMismatchModal.classList.contains('active')) testMismatchList.innerHTML = '';
+    testMismatchList.insertAdjacentHTML('beforeend', `
+        <div class="test-mismatch-item">
+            <div class="test-mismatch-file">${escapeHtml(payload.fileName || payload.testName || 'Teste')}${payload.sdTicket ? ` · SD ${escapeHtml(payload.sdTicket)}` : ''}</div>
+            <table class="sigc-compare-table">
+                <thead><tr><th>Campo</th><th>Executado (log)</th><th>Validado (SIGC)</th></tr></thead>
+                <tbody>
+                    ${mismatches.map(check => `
+                        <tr class="sigc-error">
+                            <td>${escapeHtml(check.label)}</td>
+                            <td>${escapeHtml(check.logValue)}</td>
+                            <td>${escapeHtml(check.sigcValue)}</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>`);
+    testMismatchModal.classList.add('active');
+    testMismatchModal.setAttribute('aria-hidden', 'false');
+    testMismatchModal.querySelector('.test-mismatch-actions button').focus();
+}
+
+function closeTestMismatchAlert() {
+    testMismatchModal.classList.remove('active');
+    testMismatchModal.setAttribute('aria-hidden', 'true');
+}
+
+testMismatchModal.addEventListener('click', event => {
+    if (event.target === testMismatchModal || event.target.closest('[data-mismatch-close]')) closeTestMismatchAlert();
+});
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && testMismatchModal.classList.contains('active')) closeTestMismatchAlert();
+});
+
 // Tira a primeira linha quando ela é só saudação ("Prezados,", "Bom dia, prezados", "Olá!").
 function stripGreeting(text) {
     const lines = String(text || '').trim().split('\n');
@@ -2843,6 +2903,8 @@ function renderSigcResult(container, payload, result) {
     }
 
     const checks = compareSigcFields(payload, result.fields);
+    const identityMismatches = checks.filter(check => check.mismatch && TEST_IDENTITY_FIELDS.includes(check.label));
+    if (identityMismatches.length) showTestMismatchAlert(payload, identityMismatches);
     const hasError = checks.some(check => check.status === 'error');
     const hasWarning = checks.some(check => check.status === 'warning');
     const overall = hasError ? 'error' : hasWarning ? 'warning' : 'success';

@@ -394,6 +394,20 @@ body {
     cursor: pointer;
 }
 
+.test-mismatch-modal { z-index: 1200; }
+.test-mismatch-card { border-color: var(--status-danger); }
+.test-mismatch-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; padding-right: 24px; }
+.test-mismatch-head h2 { color: var(--status-danger); font-size: 1.25rem; margin-bottom: 4px; }
+.test-mismatch-head p { color: var(--text-muted); font-size: .9rem; }
+.test-mismatch-icon {
+    flex: none; display: grid; place-items: center; width: 40px; height: 40px;
+    border-radius: 50%; background: var(--status-danger-bg); color: var(--status-danger); font-weight: 700;
+}
+.test-mismatch-item { margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--status-danger-bg); }
+.test-mismatch-file { color: var(--text-title); font-weight: 600; word-break: break-all; }
+.test-mismatch-item .sigc-compare-table td { word-break: break-all; }
+.test-mismatch-actions { display: flex; justify-content: flex-end; margin-top: 18px; }
+
 #operationalTestSelectorWrap { margin: 18px 0; }
 #operationalTestSelectorWrap label { display: block; margin-bottom: 6px; font-weight: 600; }
 #operationalTestSelector {
