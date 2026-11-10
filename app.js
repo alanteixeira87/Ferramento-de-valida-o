@@ -187,6 +187,7 @@ const dbAsId = {
     "c8ee6463-eadf-4868-ab6f-af45508f2262": { "nome": "BANCO INDUSTRIAL DO BRASIL", "conglomerado": "d6d2f28d-b019-506c-a438-b11fb1172812" },
     "fcef8e3a-1a48-4a43-9946-0737b029c0c5": { "nome": "Banco Inter - Dados", "conglomerado": "31ee4f72-8769-5136-83e4-03f2dd4c935e" },
     "d7e27a98-ef6c-4b79-b2d8-c2527eba8d84": { "nome": "Banco Inter - Pagamento", "conglomerado": "31ee4f72-8769-5136-83e4-03f2dd4c935e" },
+    "efcd384a-81ed-4ac4-baab-e2236132ed59": { "nome": "Banco Inter PJ", "conglomerado": "31ee4f72-8769-5136-83e4-03f2dd4c935e" },
     "6534a862-047e-46c8-9c63-649a5c1bb836": { "nome": "BANCO KEB HANA DO BRASIL S.A.", "conglomerado": "f37149e6-e033-5f11-af23-c5c161794a93" },
     "fddcd293-b518-4b19-a5ca-6a52bc0f151d": { "nome": "Banco Master S.A.", "conglomerado": "1e6aeb44-8b00-5e2a-bcf7-e3db7f3b7e6f" },
     "d58911b5-9c4c-4570-ba32-d0bd0dbc2816": { "nome": "Banco Mercantil", "conglomerado": "5d249486-c697-5295-a856-9955ed3ac332" },
@@ -294,6 +295,7 @@ const dbAsId = {
     "b4c57bee-261d-48d5-97ba-e3599029cd05": { "nome": "LISTO", "conglomerado": "ca146165-ab58-4c91-b023-baedddbf9f16" },
     "6b3e8b90-8c15-49d4-90c4-bb3e87de2f90": { "nome": "Losango", "conglomerado": "ccdce1b1-79f4-5c42-8ba9-13cb23a18b71" },
     "ffb7aac7-b6a8-4091-a0f4-6cf17865ff46": { "nome": "MagaluPay Empresas", "conglomerado": "7eebe017-cb01-498c-81e4-6b4149b18e93" },
+    "816974ca-175b-4401-9666-db7a586757bd": { "nome": "MagaluPay", "conglomerado": "7eebe017-cb01-498c-81e4-6b4149b18e93" },
     "dcd4560f-574e-43ff-93a3-a4b4e5106899": { "nome": "MEI Fácil", "conglomerado": "6f86d2ab-8ef7-4a9b-8c5f-d081f183c490" },
     "4095c8fe-55d9-4596-a62a-c3bcc04a85db": { "nome": "Méliuz", "conglomerado": "062c5edb-4e83-5002-9981-e2a96c5ad41e" },
     "9326f9b2-ae57-42c4-a0d9-acc4ba434696": { "nome": "Mercado Pago", "conglomerado": "e5a1c7ad-11d4-560d-914c-611003a39219" },
@@ -2220,6 +2222,9 @@ function extractMetadata(htmlString) {
         const parsed = new Date(normalized);
         return Number.isNaN(parsed.getTime()) ? null : parsed;
     };
+    // Resultado oficial do FVP no topo do log: <span class="label testResult-passed">PASSED</span>
+    const fvpResultMatch = htmlString.match(/class=["'][^"']*\btestResult-([a-z]+)\b[^"']*["'][^>]*>\s*([A-Z_]+)\s*</i);
+    const fvpResult = fvpResultMatch ? (fvpResultMatch[2] || fvpResultMatch[1]).toUpperCase() : '';
     const executionCreatedDate = extractHeaderDate('Created');
     const exportedDate = extractHeaderDate('Exported');
     
@@ -2321,6 +2326,7 @@ function extractMetadata(htmlString) {
         runType: runMetadata.type,
         runCycle: runMetadata.cycle,
         sdTicket: runMetadata.sdTicket,
+        fvpResult,
         executionCreatedUtc: executionCreatedDate?.toISOString() || '',
         executionCreatedBrasilia: formatBrasiliaDate(executionCreatedDate),
         exportedBrasilia: formatBrasiliaDate(exportedDate),
@@ -2437,6 +2443,8 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     
     let validacaoHtml = "";
     let validacaoInstHtml = "";
+    // Teste com Result PASSED no FVP é aprovado: as conferências do validador viram apenas avisos.
+    const fvpPassed = meta.fvpResult === 'PASSED';
     const hasDetectedCnpj = !!(meta.cnpj && meta.cnpj !== "Não encontrado");
     
     const resolutionHintHtml = meta.authServerResolution === 'endpoint-definitive-match'
@@ -2513,7 +2521,13 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         if(!temBusiness) faltantes.push("BusinessEntity");
         if(!temCnpj) faltantes.push("BrazilCNPJ");
         
-        if (faltantes.length > 0) {
+        if (faltantes.length > 0 && fvpPassed) {
+            validacaoHtml = `
+            <div class="validation-box warning">
+                ${iconWarning}
+                <div><strong>Estrutura PJ Incompleta:</strong> Falta o campo ${faltantes.join(' e ')}.<span class="validation-note">O FVP aprovou o teste (Result: PASSED); confira os dados PJ manualmente.</span></div>
+            </div>`;
+        } else if (faltantes.length > 0) {
             validacaoHtml = `
             <div class="validation-box error">
                 ${iconError}
@@ -2564,20 +2578,20 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         validacaoInstHtml = `
         <div class="validation-box warning">
             ${iconWarning}
-            <div><strong>Erro de Leitura:</strong> Cabeçalho FVP não identificado no log. AS-ID não encontrado.</div>
+            <div><strong>Erro de Leitura:</strong> Cabeçalho FVP não identificado no log. AS-ID não encontrado.<span class="validation-note">O resultado do teste segue o FVP; confira a marca manualmente.</span></div>
         </div>`;
-        if (!resolvedIsPF) testPassed = false;
     } else {
+        // AS-ID fora da base embarcada é falta de cadastro, não falha do teste: só avisa, sem reprovar.
         validacaoInstHtml = `
         <div class="validation-box warning">
             ${iconWarning}
-            <div><strong>AS-ID Não Cadastrado:</strong> O log contém AS-ID <strong>${logAsId}</strong> (instituição: "${logNome}"), mas não está na base de dados.</div>
+            <div><strong>AS-ID Não Cadastrado:</strong> O log contém AS-ID <strong>${logAsId}</strong> (instituição: "${logNome}"), mas não está na base de dados.<span class="validation-note">O resultado do teste segue o FVP; inclua este AS-ID na base para validar a marca.</span></div>
         </div>`;
-        if (!resolvedIsPF) testPassed = false;
     }
 
     const ispbValidation = buildIspbValidation(meta, transmissoraEncontrada, validationIcons);
     if (!ispbValidation.passed) testPassed = false;
+    if (fvpPassed) testPassed = true;
 
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
     const dataStatus = testPassed ? 'passed' : 'failed';
