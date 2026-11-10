@@ -59,7 +59,9 @@ Botão **Trazer testes do Reteste**, no topo da tela "Realizar testes". Não pre
      arquivo, usa o ZIP; se for uma pasta, usa os ZIPs dela ou junta o HTML do log e os prints num ZIP
      (se o Link Log for um link do FVP, baixa a exportação `/api/log/export/<Test ID>`);
    - entrega o arquivo ao validador, que gera o card normalmente e já mostra a comparação com o SIGC.
-4. Na lista, cada teste ganha **Baixar log** (salva o ZIP, se precisar) e **Ver card**. No card, o
+4. Na lista, cada teste ganha **Baixar log** (salva o ZIP, se precisar), **Ver card** e **Responder no SIGC**
+   (também no topo do card): leva para o SIGC Retestes, busca o SD, abre o pop-up do teste e fica lá,
+   para responder o ticket pelo SIGC. No card, o
    restante continua igual: texto para o Service Desk, **Ir para o Service Desk**, bloqueio por divergência.
 
 - Só entram os testes visíveis na tela do SIGC (se houver paginação, o aviso mostra o total de registros).

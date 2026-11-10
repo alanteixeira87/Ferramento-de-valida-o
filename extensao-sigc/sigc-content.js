@@ -338,6 +338,61 @@
         return best;
     }
 
+    // Fecha o pop-up de teste aberto: Esc, depois o botão de fechar (X) do pop-up e, por fim, um clique fora dele.
+    async function closeOpenPopup() {
+        if (!findPopup()) return { ok: true };
+        const closedNow = () => !findPopup();
+
+        for (const target of [document, document.body, document.activeElement].filter(Boolean)) {
+            target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+        }
+        if (await waitFor(closedNow, 1200)) return { ok: true };
+
+        // Caixa do pop-up: sobe até o bloco fixo/flutuante (o Bubble marca o pop-up com a classe "Popup").
+        let box = findPopup();
+        for (let node = box; node && node !== document.body; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            box = node;
+            if (/popup/i.test(String(node.className || '')) || style.position === 'fixed') break;
+        }
+        const br = box.getBoundingClientRect();
+        const closeCandidates = [...box.querySelectorAll('*')].filter(el => {
+            if (!el.getClientRects().length) return false;
+            const r = el.getBoundingClientRect();
+            if (r.width < 6 || r.height < 6 || r.width > 70 || r.height > 70) return false;
+            const text = normalizeKey(el.textContent);
+            const looksLikeClose = /^(x|×|✕|✖|close|fechar|clear|cancel)$/.test(text);
+            const nearTopRight = r.top - br.top < 90 && br.right - r.right < br.width * 0.25;
+            return looksLikeClose || (nearTopRight && (el.classList.contains('clickable-element') || /^(svg|img|i|button)$/i.test(el.tagName)));
+        }).sort((a, b) => {
+            const score = (el) => (/^(x|×|✕|✖|close|fechar)$/.test(normalizeKey(el.textContent)) ? 0 : 1000)
+                + (br.right - el.getBoundingClientRect().right) + (el.getBoundingClientRect().top - br.top);
+            return score(a) - score(b);
+        });
+
+        for (const candidate of closeCandidates.slice(0, 3)) {
+            const clickable = candidate.closest('.clickable-element') || candidate;
+            clickElement(clickable);
+            if (typeof clickable.click === 'function') clickable.click();
+            if (await waitFor(closedNow, 1200)) return { ok: true };
+            const r = clickable.getBoundingClientRect();
+            const trusted = await chrome.runtime.sendMessage({ type: 'TRUSTED_CLICK', x: r.left + r.width / 2, y: r.top + r.height / 2 });
+            if (trusted?.ok && await waitFor(closedNow, 1500)) return { ok: true };
+        }
+
+        // Clique real fora do pop-up (no fundo escurecido), que fecha pop-ups do Bubble configurados assim.
+        const outsideX = br.left > 40 ? Math.round(br.left / 2) : Math.round((br.right + innerWidth) / 2);
+        const trusted = await chrome.runtime.sendMessage({ type: 'TRUSTED_CLICK', x: Math.min(outsideX, innerWidth - 5), y: Math.max(10, Math.round(br.top / 2)) });
+        if (trusted?.ok && await waitFor(closedNow, 1500)) return { ok: true };
+
+        const describe = (el) => `${el.tagName.toLowerCase()}.${String(el.className || '').trim().split(/\s+/).slice(0, 2).join('.')} "${normalizeText(el.textContent).slice(0, 15)}"`;
+        return {
+            ok: false,
+            diag: `[Diagnóstico: caixa do pop-up ${describe(box)} em x=${Math.round(br.left)}..${Math.round(br.right)} y=${Math.round(br.top)}..${Math.round(br.bottom)}; `
+                + `botões de fechar testados: ${closeCandidates.slice(0, 3).map(describe).join('; ') || 'nenhum encontrado'}]`
+        };
+    }
+
     async function waitFor(fn, timeoutMs) {
         const start = Date.now();
         if (timeoutMs <= 0) return fn() || null;
@@ -456,7 +511,13 @@
             return { ok: true, rowsFound: 1, fromOpenPopup: true, fields: readPopup(manualPopup) };
         }
 
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        if (payload.skipManualWait) {
+            // Importação / Responder no SIGC: o pop-up do teste anterior precisa sair da frente da lista.
+            const closed = await closeOpenPopup();
+            if (!closed.ok) return { ok: false, error: `O pop-up do teste anterior continuou aberto no SIGC e cobre a lista. Feche-o e tente de novo. ${closed.diag}` };
+        } else {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        }
         await sleep(400);
 
         const filterLabel = await waitFor(() => {

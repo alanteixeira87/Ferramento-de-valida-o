@@ -84,6 +84,39 @@
         rowEl.querySelector('.retest-import-actions').insertAdjacentHTML('beforeend', html);
     }
 
+    function answerButtonHtml(sd, testName) {
+        return sd
+            ? `<button type="button" class="btn-view-log retest-answer-sigc" data-sd="${escapeHtml(sd)}" data-test="${escapeHtml(testName || '')}" title="Abre o teste do SD ${escapeHtml(sd)} no SIGC Retestes, com o pop-up aberto para responder">Responder no SIGC</button>`
+            : `<button type="button" class="btn-view-log" disabled title="O SIGC não informou o SD deste teste">Responder no SIGC</button>`;
+    }
+
+    // Vai para o teste no SIGC: busca o SD na tela de Retestes, abre o pop-up e fica no SIGC (não volta ao validador).
+    async function answerInSigc(buttonEl) {
+        if (!isSigcExtensionReady()) {
+            buttonEl.title = 'A extensão "QA Analytics - Correlação SIGC" não está instalada ou ativa neste navegador.';
+            buttonEl.textContent = 'Extensão inativa';
+            return;
+        }
+        const sd = buttonEl.dataset.sd;
+        const buttons = [...document.querySelectorAll(`.retest-answer-sigc[data-sd="${CSS.escape(sd)}"]`)];
+        const setAll = (text, disabled) => buttons.forEach(b => { b.textContent = text; b.disabled = disabled; });
+        setAll('Abrindo no SIGC...', true);
+        const result = await extensionRequest('SIGC_CHECK', {
+            sdTicket: sd,
+            testName: buttonEl.dataset.test || '',
+            module: 'retestes',
+            skipManualWait: true,
+            returnToValidator: false
+        });
+        if (result?.ok) {
+            setAll('Responder no SIGC', false);
+        } else {
+            setAll('Não abriu: tentar de novo', false);
+            buttons.forEach(b => { b.title = result?.error || 'Falha ao abrir o teste no SIGC.'; });
+            statusEl.textContent = `Responder no SIGC (SD ${sd}): ${result?.error || 'falha ao abrir o teste no SIGC.'}`;
+        }
+    }
+
     // Um teste já lido do pop-up: links do log → log do FVP → card validado e comparado com o SIGC.
     async function importTest(lookup, rowEl) {
         const fields = lookup.fields || {};
@@ -163,6 +196,10 @@
                 const card = container.closest('.file-report');
                 if (card) card.id = `retest-card-${id}`;
                 addRowAction(rowEl, `<button type="button" class="btn-view-log retest-import-goto" data-card="retest-card-${id}">Ver card</button>`);
+                // "Responder no SIGC": no cabeçalho do card (não é redesenhado nas novas conferências) e na lista.
+                const answerButton = answerButtonHtml(sigcSd, fields.testePrincipal);
+                card?.querySelector('.card-actions')?.insertAdjacentHTML('beforeend', answerButton);
+                if (i === 0) addRowAction(rowEl, answerButton);
                 results.push(card?.dataset.status === 'passed');
             }
         }
@@ -219,6 +256,10 @@
     }
 
     button.addEventListener('click', importAll);
+    document.addEventListener('click', event => {
+        const answer = event.target.closest('.retest-answer-sigc');
+        if (answer && !answer.disabled) answerInSigc(answer);
+    });
     listEl.addEventListener('click', event => {
         const goto = event.target.closest('.retest-import-goto');
         if (!goto) return;
