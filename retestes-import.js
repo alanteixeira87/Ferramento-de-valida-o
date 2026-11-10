@@ -53,7 +53,7 @@
         return bytes;
     }
 
-    function addRow(index, fields) {
+    function addRow(index, fields, priority = false) {
         const info = [
             fields.nomeInstituicao && `<span><b>Instituição:</b> ${escapeHtml(fields.nomeInstituicao)}</span>`,
             fields.segmento && `<span><b>Segmento:</b> ${escapeHtml(fields.segmento)}</span>`,
@@ -62,9 +62,9 @@
         ].filter(Boolean).join('');
         listEl.hidden = false;
         listEl.insertAdjacentHTML('beforeend', `
-            <div class="retest-import-row" data-index="${index}">
+            <div class="retest-import-row${priority ? ' is-priority' : ''}" data-index="${index}">
                 <div class="retest-import-info">
-                    <strong>${index + 1}. SD ${escapeHtml(fields.serviceDesk || 'não informado')}</strong>
+                    <strong>SD ${escapeHtml(fields.serviceDesk || 'não informado')}${priority ? '<span class="badge badge-priority">Prioridade</span>' : ''}</strong>
                     <div class="retest-import-cols">${info}</div>
                 </div>
                 <div class="retest-import-actions">
@@ -220,10 +220,12 @@
 
         let ok = 0, failed = 0, errors = 0, total = 0;
         try {
+            // 1ª etapa: abre o pop-up de cada linha e lê os dados (sem baixar nada ainda).
+            const pending = [];
             for (let index = 0; index < MAX_ROWS; index++) {
                 statusEl.textContent = total
-                    ? `Abrindo o teste ${index + 1} de ${total} no SIGC...`
-                    : 'Abrindo o primeiro teste da aba Retestes do SIGC...';
+                    ? `Lendo o teste ${index + 1} de ${total} no SIGC...`
+                    : 'Lendo o primeiro teste da aba Retestes do SIGC...';
                 const row = await extensionRequest('SIGC_ROW', { index });
                 if (row?.total) total = row.total;
                 if (row?.ok && row.done) break;
@@ -234,22 +236,34 @@
                     continue;
                 }
 
-                const rowEl = addRow(index, row.fields || {});
+                const priority = window.isPriorityTest?.(row.fields?.testePrincipal) || false;
+                const rowEl = addRow(index, row.fields || {}, priority);
                 if (row.sameAsPrevious) {
                     errors++;
                     setRowState(rowEl, 'O pop-up não mudou em relação ao teste anterior (o clique no olho pode não ter funcionado). Teste não importado.', 'error');
                     continue;
                 }
-                statusEl.textContent = `Teste ${index + 1} de ${total}: validando o log...`;
+                setRowState(rowEl, priority ? 'Prioridade: será validado primeiro' : 'Lido; aguardando validação');
+                pending.push({ row, rowEl, priority });
+            }
+
+            // 2ª etapa: testes de longa duração (Pix Scheduling, Retry, Verification) primeiro, no topo da lista.
+            const ordered = [...pending.filter(item => item.priority), ...pending.filter(item => !item.priority)];
+            ordered.forEach(item => listEl.appendChild(item.rowEl));
+            const priorityCount = ordered.filter(item => item.priority).length;
+
+            for (let i = 0; i < ordered.length; i++) {
+                const { row, rowEl, priority } = ordered[i];
+                statusEl.textContent = `Validando ${i + 1} de ${ordered.length}${priority ? ' (prioridade)' : ''}...`;
                 const result = await importTest(row, rowEl);
                 if (result.done) result.passed ? ok++ : failed++;
                 else errors++;
                 if (result.loginRequired) {
-                    statusEl.textContent = 'Faça login no FVP na aba que foi aberta e clique em "Trazer testes do Reteste" de novo.';
+                    statusEl.textContent = 'Faça login na aba que foi aberta (SharePoint ou FVP) e clique em "Trazer testes do Reteste" de novo.';
                     return;
                 }
             }
-            statusEl.textContent = `Concluído: ${total} teste(s) da aba Retestes. ${ok} OK, ${failed} com falha, ${errors} não importado(s).`;
+            statusEl.textContent = `Concluído: ${total} teste(s) da aba Retestes${priorityCount ? `, ${priorityCount} de prioridade validado(s) primeiro` : ''}. ${ok} OK, ${failed} com falha, ${errors} não importado(s).`;
         } finally {
             button.disabled = false;
         }

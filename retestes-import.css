@@ -8,6 +8,11 @@
     box-shadow: var(--sombra-card);
     overflow: hidden;
 }
+/* Etiqueta de teste prioritário (prioridade.js): cards e lista da importação. */
+.badge-priority { background: var(--pendente-fundo); color: var(--pendente-texto); box-shadow: inset 0 0 0 1px var(--pendente-borda); }
+.retest-import-row.is-priority { box-shadow: inset 4px 0 0 var(--pendente); }
+.retest-import-info strong .badge-priority { margin-left: 8px; }
+
 .retest-import-error { margin: 0; border-radius: 0; word-break: break-word; }
 .retest-import-row {
     display: flex;
