@@ -1,10 +1,15 @@
 {
   "manifest_version": 3,
   "name": "QA Analytics - Correlação SIGC",
-  "version": "1.0.0",
-  "description": "Correlaciona os testes do validador de logs FVP com a plataforma SIGC Retestes usando a sessão já logada do navegador.",
+  "version": "1.1.0",
+  "description": "Correlaciona os testes do validador de logs FVP com a plataforma SIGC Retestes e traz os logs do FVP usando as sessões já logadas do navegador.",
   "permissions": ["tabs", "debugger", "scripting"],
-  "host_permissions": ["https://www.sigc.com.br/*", "https://sigc.com.br/*"],
+  "host_permissions": [
+    "https://www.sigc.com.br/*",
+    "https://sigc.com.br/*",
+    "https://web.fvp.directory.openbankingbrasil.org.br/*",
+    "https://*.sharepoint.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },

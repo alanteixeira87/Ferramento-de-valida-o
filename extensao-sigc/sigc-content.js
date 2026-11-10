@@ -215,6 +215,26 @@
             });
     }
 
+    // Campos "Link Log" do pop-up (o log do FVP do teste), separados dos "Link Evidência".
+    // Usado pela importação da aba Retestes; sobe pelos blocos do pop-up até achar os rótulos.
+    function readLogLinks(popup) {
+        const pattern = /^link\s*(d[eo]s?\s*)?logs?(\s*\d+)?$/;
+        let scope = popup;
+        let labels = [];
+        while (scope) {
+            labels = findLabels(pattern, scope);
+            if (labels.length || scope === document.body) break;
+            scope = scope.parentElement;
+        }
+        return labels
+            .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+            .map((label, i) => {
+                const el = evidenceValueNear(label, scope);
+                const link = el ? linkValue(el) : '';
+                return { nome: `Log ${i + 1}`, link: /^[\s\-–—]*$/.test(link) ? '' : link };
+            });
+    }
+
     // Campo "Observações" do pop-up, mantendo as quebras de linha. Vazio ou "-" vira "".
     function readObservations(popup) {
         let scope = popup;
@@ -320,6 +340,7 @@
 
     async function waitFor(fn, timeoutMs) {
         const start = Date.now();
+        if (timeoutMs <= 0) return fn() || null;
         while (Date.now() - start < timeoutMs) {
             const value = fn();
             if (value) return value;
@@ -428,7 +449,8 @@
         }
 
         // Dá uma margem para o operador abrir o pop-up do teste; se abrir, lê direto dele.
-        const manualPopup = await waitFor(() => manualPopupFor(ticket), MANUAL_POPUP_MS);
+        // A importação da aba Retestes (skipManualWait) busca direto, sem esperar o operador.
+        const manualPopup = await waitFor(() => manualPopupFor(ticket), payload.skipManualWait ? 0 : MANUAL_POPUP_MS);
         if (manualPopup) {
             await sleep(800);
             return { ok: true, rowsFound: 1, fromOpenPopup: true, fields: readPopup(manualPopup) };
@@ -523,7 +545,154 @@
         return { ok: true, rowsFound: cells.length, fields: readPopup(popup) };
     }
 
+    const centerY = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+    const centerX = (el) => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
+
+    // Onde estão os números que a leitura normal não vê: texto oculto, campos (input), iframe ou shadow DOM.
+    function hiddenNumbersDiagnostics() {
+        const raw = [];
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+            if (/\d{5,}/.test(node.nodeValue || '')) raw.push(node);
+        }
+        const why = (el) => {
+            const s = getComputedStyle(el);
+            let hiddenBy = '';
+            for (let a = el; a && a !== document.body; a = a.parentElement) {
+                const as = getComputedStyle(a);
+                if (as.display === 'none' || as.visibility === 'hidden' || Number(as.opacity) === 0) {
+                    hiddenBy = `${a.tagName.toLowerCase()}.${String(a.className || '').trim().split(/\s+/).slice(0, 2).join('.')} (display=${as.display}, visibility=${as.visibility}, opacity=${as.opacity})`;
+                    break;
+                }
+            }
+            return `<${el.tagName.toLowerCase()}> rects=${el.getClientRects().length} opacity=${s.opacity} visibility=${s.visibility} display=${s.display}${hiddenBy ? ` oculto por ${hiddenBy}` : ''}`;
+        };
+        const inputs = [...document.querySelectorAll('input, textarea')].filter(el => /\d{5,}/.test(el.value || ''));
+        const shadowHosts = [...document.querySelectorAll('*')].filter(el => el.shadowRoot).length;
+        return `números (5+ dígitos) no HTML ignorando visibilidade: ${raw.length}`
+            + ` (ex.: ${raw.slice(0, 3).map(n => `"${normalizeText(n.nodeValue).slice(0, 25)}" ${why(n.parentElement)}`).join('; ') || 'nenhum'}); `
+            + `campos com números: ${inputs.length}${inputs.length ? ` (ex.: "${inputs[0].value.slice(0, 25)}" ${why(inputs[0])})` : ''}; `
+            + `iframes: ${document.querySelectorAll('iframe').length}; shadow DOM: ${shadowHosts}; canvas: ${document.querySelectorAll('canvas').length}`;
+    }
+
+    // Botões "Verificar" (olho) da lista de Retestes, de cima para baixo: elementos pequenos na coluna
+    // "Verificar", abaixo do cabeçalho e fora do pop-up. Um por linha (o mais "clicável" de cada altura).
+    function findEyeButtons() {
+        const popup = findPopup();
+        const outside = (el) => !popup || !popup.contains(el);
+        const header = findLabels('Verificar').find(outside);
+        if (!header) return { header: null, eyes: [] };
+        const hx = centerX(header);
+        const headerBottom = header.getBoundingClientRect().bottom;
+
+        const candidates = [...document.body.querySelectorAll('*')].filter(el => {
+            if (!outside(el) || header.contains(el) || el.contains(header)) return false;
+            if (!el.getClientRects().length) return false;
+            const r = el.getBoundingClientRect();
+            if (r.width < 8 || r.height < 8 || r.width > 90 || r.height > 90) return false;
+            return r.top > headerBottom && Math.abs(centerX(el) - hx) <= 40;
+        });
+
+        // Agrupa por linha (mesma altura) e escolhe o elemento clicável do Bubble, se houver.
+        const rows = [];
+        for (const el of candidates.sort((a, b) => centerY(a) - centerY(b))) {
+            const cy = centerY(el);
+            let row = rows.find(item => Math.abs(item.y - cy) <= 12);
+            if (!row) { row = { y: cy, els: [] }; rows.push(row); }
+            row.els.push(el);
+        }
+        const eyes = rows.map(row =>
+            row.els.find(el => el.classList.contains('clickable-element'))
+            || row.els.find(el => el.closest('.clickable-element'))?.closest('.clickable-element')
+            || row.els.reduce((best, el) => {
+                const area = el.getBoundingClientRect().width * el.getBoundingClientRect().height;
+                return !best || area < best.area ? { el, area } : best;
+            }, null).el
+        );
+        return { header, eyes: [...new Set(eyes)] };
+    }
+
+    // Assinatura do pop-up, para saber quando ele trocou para o teste da próxima linha.
+    const popupSignature = (popup) => ['Service Desk', 'AS-ID', 'Teste Principal', 'Aliás', 'Ciclo']
+        .map(label => readPopupField(popup, label)).join('|') + '|' + readEvidenceLinks(popup).map(item => item.link).join(',');
+
+    function eyeDiagnostics() {
+        const { header, eyes } = findEyeButtons();
+        const pos = (el) => `x=${Math.round(centerX(el))} y=${Math.round(centerY(el))}`;
+        return `[Diagnóstico: cabeçalho "Verificar" ${header ? pos(header) : 'NÃO encontrado'}; olhos encontrados: ${eyes.length}`
+            + `${eyes.length ? ` (${eyes.slice(0, 4).map(el => `${el.tagName.toLowerCase()}.${String(el.className || '').trim().split(/\s+/).slice(0, 2).join('.')} ${pos(el)}`).join('; ')})` : ''}; `
+            + `registros = "${readRecordCount() || '?'}"; pop-up aberto = ${findPopup() ? 'sim' : 'não'}; ${hiddenNumbersDiagnostics()}]`;
+    }
+
+    // Abre o pop-up da linha "index" da lista (clicando no olho) e lê os dados, sem pesquisar pelo SD.
+    async function openListRow(payload) {
+        if (!/\/retestes/i.test(location.pathname)) {
+            return { ok: false, error: 'A aba do SIGC aberta não está na tela de Retestes.' };
+        }
+        const index = Number(payload?.index) || 0;
+        const found = await waitFor(() => findEyeButtons().eyes.length ? true : null, index === 0 ? 25000 : 8000);
+        const { eyes } = findEyeButtons();
+        if (!found || !eyes.length) {
+            return { ok: false, error: `Nenhum botão Verificar (olho) encontrado na lista de Retestes. ${eyeDiagnostics()}` };
+        }
+        if (index >= eyes.length) return { ok: true, done: true, total: eyes.length };
+
+        const openPopup = findPopup();
+        const before = openPopup ? popupSignature(openPopup) : '';
+        const loaded = () => {
+            const popup = findPopup();
+            if (!popup || !readPopupField(popup, 'AS-ID')) return null;
+            return !before || popupSignature(popup) !== before ? popup : null;
+        };
+
+        const eye = eyes[index];
+        eye.scrollIntoView({ block: 'center' });
+        await sleep(300);
+        clickElement(eye);
+        if (typeof eye.click === 'function') eye.click();
+        let popup = await waitFor(loaded, 5000);
+
+        // O Bubble ignorou o clique por script: fecha o pop-up anterior e faz um clique real.
+        if (!popup) {
+            if (findPopup()) {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                await waitFor(() => !findPopup(), 2000);
+            }
+            const r = eye.getBoundingClientRect();
+            const trusted = await chrome.runtime.sendMessage({ type: 'TRUSTED_CLICK', x: r.left + r.width / 2, y: r.top + r.height / 2 });
+            if (!trusted?.ok) {
+                return { ok: false, total: eyes.length, error: `O clique no olho da linha ${index + 1} falhou: ${trusted?.error || 'sem resposta'}. ${eyeDiagnostics()}` };
+            }
+            popup = await waitFor(() => {
+                const current = findPopup();
+                return current && readPopupField(current, 'AS-ID') ? current : null;
+            }, 15000);
+        }
+        if (!popup) {
+            return { ok: false, total: eyes.length, error: `O pop-up da linha ${index + 1} não abriu. ${eyeDiagnostics()}` };
+        }
+
+        await sleep(800);
+        const finalPopup = findPopup() || popup;
+        return {
+            ok: true,
+            total: eyes.length,
+            index,
+            sameAsPrevious: !!before && popupSignature(finalPopup) === before,
+            rowsFound: 1,
+            fromOpenPopup: true,
+            fields: { ...readPopup(finalPopup), linksLog: readLogLinks(finalPopup) }
+        };
+    }
+
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+        if (message?.type === 'SIGC_ROW') {
+            openListRow(message.payload)
+                .then(sendResponse)
+                .catch(error => sendResponse({ ok: false, error: `Erro ao abrir a linha da lista do SIGC: ${error?.message || error}` }));
+            return true;
+        }
         if (message?.type !== 'SIGC_LOOKUP') return false;
         lookup(message.payload)
             .then(sendResponse)

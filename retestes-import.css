@@ -1,0 +1,40 @@
+/* Importação da aba Retestes do SIGC (retestes-import.js). Usa os tokens do design system. */
+.retest-import-list {
+    display: flex;
+    flex-direction: column;
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: var(--raio-xl);
+    box-shadow: var(--sombra-card);
+    overflow: hidden;
+}
+.retest-import-error { margin: 0; border-radius: 0; word-break: break-word; }
+.retest-import-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--borda);
+}
+.retest-import-row:last-child { border-bottom: 0; }
+.retest-import-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.retest-import-info strong { color: var(--texto); font-size: var(--fs-sm); font-weight: 600; }
+.retest-import-cols {
+    display: flex; flex-wrap: wrap; gap: 4px 14px;
+    color: var(--texto-3); font-size: var(--fs-xs);
+}
+.retest-import-cols b { color: var(--texto-2); font-weight: 600; }
+.retest-import-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.retest-import-state {
+    padding: 6px 12px; border-radius: var(--raio-pill);
+    font-size: var(--fs-xs); font-weight: 600; max-width: 420px;
+}
+.retest-import-state.pending { background: var(--superficie-2); color: var(--texto-2); }
+.retest-import-state.success { background: var(--sucesso-fundo); color: var(--sucesso-texto); }
+.retest-import-state.error { background: var(--falha-fundo); color: var(--falha-texto); }
+
+@media (max-width: 768px) {
+    .retest-import-row { flex-direction: column; align-items: stretch; }
+    .retest-import-actions { justify-content: flex-start; }
+}

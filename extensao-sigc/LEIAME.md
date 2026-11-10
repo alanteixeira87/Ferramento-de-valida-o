@@ -46,6 +46,26 @@ Se ele estiver hospedado em outro endereço, inclua esse endereço em
    SIGC e clique de novo em **Ler Reteste** (ou **Conferir no SIGC**): a conferência sem divergência
    libera o Service Desk. Em Qualidade e Execução, o botão continua sendo **Ir para o SIGC**.
 
+### Trazer testes do Reteste (importação da aba Retestes)
+
+Botão **Trazer testes do Reteste**, no topo da tela "Realizar testes". Não precisa baixar nem arrastar ZIP.
+
+1. Faça login no **SIGC** e na conta **Microsoft** (SharePoint da Chicago) no mesmo navegador.
+2. No SIGC, deixe a tela de **Retestes** com os filtros desejados (datas, Validação etc.).
+3. No validador, clique em **Trazer testes do Reteste**. Para cada linha da lista, de cima para baixo, a extensão:
+   - clica no olho (**Verificar**), lê o pop-up do teste e o link do log (campo **Link Log**; o
+     "Link Evidência" continua sendo usado só no texto do Service Desk);
+   - baixa os arquivos do Link Log no **SharePoint** usando a sessão Microsoft logada: se o link for um
+     arquivo, usa o ZIP; se for uma pasta, usa os ZIPs dela ou junta o HTML do log e os prints num ZIP
+     (se o Link Log for um link do FVP, baixa a exportação `/api/log/export/<Test ID>`);
+   - entrega o arquivo ao validador, que gera o card normalmente e já mostra a comparação com o SIGC.
+4. Na lista, cada teste ganha **Baixar log** (salva o ZIP, se precisar) e **Ver card**. No card, o
+   restante continua igual: texto para o Service Desk, **Ir para o Service Desk**, bloqueio por divergência.
+
+- Só entram os testes visíveis na tela do SIGC (se houver paginação, o aviso mostra o total de registros).
+- Sem login no FVP, a extensão abre uma aba do FVP e para a importação: faça login e clique de novo.
+- O nome do arquivo não traz PF/PJ: o segmento vem do alias e do conteúdo do log, e é comparado com o SIGC.
+
 ### Leitura do pop-up aberto (Reteste, Qualidade e Execução)
 
 Todo card tem três botões de leitura, um para cada módulo do SIGC:
