@@ -575,6 +575,118 @@ function buildIspbValidation(meta, registeredBrand, icons) {
     };
 }
 
+// -------------------------------------------------------------
+// TRAVA DE MESMO ISPB (Sweeping Accounts / Jornada Otimizada)
+// -------------------------------------------------------------
+// Nesses planos o dinheiro sai da conta do usuário na instituição testada (debtor, identificada pelo AS-ID)
+// para uma conta do próprio usuário em OUTRA instituição (creditor). Se as duas forem o mesmo banco (mesmo ISPB),
+// a jornada não faz sentido e o teste precisa ser reexecutado.
+// Lista fechada de módulos: somente estes testes recebem a trava.
+const SAME_ISPB_GUARDED_PLANS = [
+    {
+        label: 'Sweeping Accounts (fvp_automatic-payments_api_sweeping-accounts)',
+        modules: [
+            'fvp_automatic-payments_api_sweeping-accounts-core_test-module_v2',
+            'fvp_automatic-payments_api_sweeping-accounts-totalAllowedAmount_test-module_v2'
+        ]
+    },
+    {
+        label: 'Optimised Journey - v1.0 - Automatic Payments API - v2.2.0 - Open FVP',
+        modules: [
+            'fvp-optimised-journey_sweeping_payments-balances_test-module-v1',
+            'fvp-optimised-journey_sweeping_revoked-consent_payments_test-module-v1',
+            'fvp-optimised-journey_sweeping_revoked-recurring-consent_test-module-v1',
+            'fvp-optimised-journey_sweeping_invalid-par_test-module-v1',
+            'fvp-optimised-journey_sweeping_invalid-request_test-module-v1'
+        ]
+    },
+    {
+        label: 'Optimised Journey - v1.0 - Core - Open FVP',
+        modules: [
+            'fvp-optimised-journey_automatic-pix_test-module-v1',
+            'fvp-optimised-journey_invalid-permissions_test-module-v1',
+            'fvp-optimised-journey_payments_test-module-v1'
+        ]
+    },
+    {
+        label: 'Optimised Journey - v1.0 - Enrollments API - v2.2.0 - Open FVP',
+        modules: [
+            'fvp-optimised-journey_enrollments-balances_test-module-v1',
+            'fvp-optimised-journey_enrollments_revoked-consent_payments_test-module-v1',
+            'fvp-optimised-journey_enrollments_revoked-enrollment_test-module-v1',
+            'fvp-optimised-journey_enrollments-invalid-request_test-module-v1',
+            'fvp-optimised-journey_enrollments-invalid_par_test-module-v1'
+        ]
+    }
+];
+
+// Comparação sem diferenciar maiúsculas, hífen e underscore (ex.: "invalid-par" x "invalid_par").
+const normalizeModuleName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function findSameIspbGuardedPlan(fileName, meta) {
+    const sources = [meta?.testName, fileName, meta?.planName, meta?.alias]
+        .filter(value => value && value !== 'Não encontrado')
+        .map(normalizeModuleName);
+    if (!sources.length) return null;
+
+    for (const plan of SAME_ISPB_GUARDED_PLANS) {
+        const module = plan.modules.find(name => {
+            const key = normalizeModuleName(name);
+            return sources.some(source => source === key || source.includes(key));
+        });
+        if (module) return { label: `${plan.label} — ${module}`, module };
+    }
+    return null;
+}
+
+function buildSameIspbGuard(fileName, meta, registeredBrand, icons) {
+    const plan = findSameIspbGuardedPlan(fileName, meta);
+    if (!plan) return { applies: false, blocked: false, html: '' };
+
+    const creditorIspb = normalizeIspb(meta?.creditor?.creditorAccountIspb);
+    // Só o vínculo exato pelo AS-ID: a busca por nome gera falsos vínculos (ex.: "Crefisa" casa com "Efí").
+    const debtorAsId = normalizeAsId(meta?.asId);
+    const debtorEntries = debtorAsId ? brandIspbBase.filter(item => item.asId === debtorAsId) : [];
+    const debtorIspbs = [...new Set(debtorEntries.map(item => item.ispb).filter(Boolean))];
+    const planText = `<span class="validation-detail">Plano sob a regra: ${escapeHtml(plan.label)}</span>`;
+
+    if (!creditorIspb || !debtorIspbs.length) {
+        const missing = !creditorIspb
+            ? 'o log não trouxe o <b>creditorAccountIspb</b>'
+            : `o AS-ID <b>${escapeHtml(meta?.asId || '')}</b> não tem ISPB vinculado na base local`;
+        return {
+            applies: true,
+            blocked: false,
+            html: `<div class="validation-box warning">${icons.warning}<div><strong>Conferência Debtor x Creditor não realizada:</strong> ${missing}. Confira manualmente se as contas não são da mesma instituição.<br>${planText}</div></div>`
+        };
+    }
+
+    if (debtorIspbs.includes(creditorIspb)) {
+        const sameBank = debtorEntries.find(item => item.ispb === creditorIspb);
+        const bankName = sameBank?.brand || sameBank?.conglomerate || registeredBrand?.nome || 'mesma instituição';
+        return {
+            applies: true,
+            blocked: true,
+            // Dados do pop-up de erro (exibido no lugar da caixa no card).
+            alert: {
+                fileName,
+                testName: meta?.testName && meta.testName !== 'Não encontrado' ? meta.testName : plan.module,
+                planLabel: plan.label,
+                creditorIspb,
+                bankName,
+                asId: meta?.asId || ''
+            },
+            html:`<div class="validation-box error">${icons.error}<div><strong>Teste inválido — Debtor e Creditor no mesmo banco:</strong> a conta creditor configurada (ISPB <b>${escapeHtml(creditorIspb)}</b>) pertence à mesma instituição do AS-ID testado (<b>${escapeHtml(bankName)}</b>). Nesta jornada o dinheiro deve ir para uma conta do usuário em <b>outra</b> instituição.<span class="validation-note"><b>Reexecute o teste</b> configurando uma conta creditor de outro banco (ISPB diferente de ${escapeHtml(creditorIspb)}).</span>${planText}</div></div>`
+        };
+    }
+
+    return {
+        applies: true,
+        blocked: false,
+        html: `<div class="validation-box success">${icons.success}<div><strong>Debtor x Creditor em instituições distintas:</strong> ISPB creditor <b>${escapeHtml(creditorIspb)}</b> difere do(s) ISPB(s) do AS-ID testado (${escapeHtml(debtorIspbs.join(', '))}).<br>${planText}</div></div>`
+    };
+}
+
 const ispbBaseInput = document.getElementById('ispbBaseInput');
 const ispbBaseBtn = document.getElementById('ispbBaseBtn');
 ispbBaseBtn?.addEventListener('click', () => ispbBaseInput?.click());
@@ -1701,6 +1813,7 @@ async function processFiles(files) {
     window.addEventListener('unhandledrejection', onUnhandledRejection);
 
     let htmlFinal = "";
+    const sameIspbAlerts = [];
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -1738,6 +1851,7 @@ async function processFiles(files) {
             else dashboardStats.failed++;
 
             htmlFinal += blockResult.html;
+            if (blockResult.sameIspbAlert) sameIspbAlerts.push(blockResult.sameIspbAlert);
 
         } catch (error) {
             console.error(`Erro no arquivo ${file.name}:`, error);
@@ -1757,7 +1871,64 @@ async function processFiles(files) {
     if (loadingEl) loadingEl.remove();
     container.insertAdjacentHTML('afterbegin', htmlFinal);
     updateScoreboard();
+    if (sameIspbAlerts.length) showSameIspbAlert(sameIspbAlerts);
 }
+
+// -------------------------------------------------------------
+// POP-UP: DEBTOR E CREDITOR NO MESMO BANCO (trava de mesmo ISPB)
+// -------------------------------------------------------------
+document.body.insertAdjacentHTML('beforeend', `
+<div id="sameIspbModal" class="operational-modal test-mismatch-modal" role="alertdialog" aria-modal="true" aria-labelledby="sameIspbTitle" aria-hidden="true">
+    <div class="operational-modal-card test-mismatch-card">
+        <button type="button" class="operational-modal-close" data-same-ispb-close aria-label="Fechar">${lucideIcon('x', 20)}</button>
+        <div class="test-mismatch-head">
+            <span class="test-mismatch-icon">${lucideIcon('x', 20)}</span>
+            <div>
+                <h2 id="sameIspbTitle">Teste inválido: Debtor e Creditor no mesmo banco</h2>
+                <p>A conta creditor configurada pertence à mesma instituição do AS-ID testado. Nesta jornada o dinheiro deve ir para uma conta do usuário em <b>outra</b> instituição. <b>Reexecute o teste</b> com uma conta creditor de outro banco.</p>
+            </div>
+        </div>
+        <div id="sameIspbList"></div>
+        <div class="test-mismatch-actions">
+            <button type="button" class="btn-view-log" data-same-ispb-close>Entendi</button>
+        </div>
+    </div>
+</div>`);
+
+const sameIspbModal = document.getElementById('sameIspbModal');
+const sameIspbList = document.getElementById('sameIspbList');
+
+// Vários arquivos na mesma carga se acumulam no mesmo pop-up até ele ser fechado.
+function showSameIspbAlert(alerts) {
+    if (!sameIspbModal.classList.contains('active')) sameIspbList.innerHTML = '';
+    sameIspbList.insertAdjacentHTML('beforeend', alerts.map(alert => `
+        <div class="test-mismatch-item">
+            <div class="test-mismatch-file">${escapeHtml(alert.fileName || alert.testName)}</div>
+            <table class="sigc-compare-table">
+                <tbody>
+                    <tr><td>Módulo</td><td>${escapeHtml(alert.testName)}</td></tr>
+                    <tr><td>Plano</td><td>${escapeHtml(alert.planLabel)}</td></tr>
+                    <tr><td>AS-ID testado (debtor)</td><td>${escapeHtml(alert.bankName)}${alert.asId ? ` · ${escapeHtml(alert.asId)}` : ''}</td></tr>
+                    <tr class="sigc-error"><td>ISPB da conta creditor</td><td>${escapeHtml(alert.creditorIspb)} (mesmo banco)</td></tr>
+                </tbody>
+            </table>
+        </div>`).join(''));
+    sameIspbModal.classList.add('active');
+    sameIspbModal.setAttribute('aria-hidden', 'false');
+    sameIspbModal.querySelector('.test-mismatch-actions button').focus();
+}
+
+function closeSameIspbAlert() {
+    sameIspbModal.classList.remove('active');
+    sameIspbModal.setAttribute('aria-hidden', 'true');
+}
+
+sameIspbModal.addEventListener('click', event => {
+    if (event.target === sameIspbModal || event.target.closest('[data-same-ispb-close]')) closeSameIspbAlert();
+});
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && sameIspbModal.classList.contains('active')) closeSameIspbAlert();
+});
 
 // -------------------------------------------------------------
 // EXTRAÇÃO DE EVIDÊNCIAS E GERAÇÃO DE MINIATURAS
@@ -2185,6 +2356,10 @@ function extractMetadata(htmlString) {
         return 'Não encontrado';
     };
     const testName = extractTestName(htmlString);
+    // Nome do plano (quando o log trouxer) para identificar planos com regras específicas.
+    const planName = ['Plan Name', 'planName', 'Test Plan', 'plan_name']
+        .map(extractValue)
+        .find(value => value && value !== 'Não encontrado') || 'Não encontrado';
 
     const extractTestIdFromHeader = (str) => {
         const spanMatch =
@@ -2308,9 +2483,10 @@ function extractMetadata(htmlString) {
     const temBrazilCnpj = hasMeaningfulBrazilCnpj(htmlString);
 
     return { 
-        alias, 
+        alias,
         testName,
-        asId, 
+        planName,
+        asId,
         cnpj: cnpjDaInstituicao, 
         institutionName, 
         temBusinessEntity, 
@@ -2593,6 +2769,10 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     if (!ispbValidation.passed) testPassed = false;
     if (fvpPassed) testPassed = true;
 
+    // Trava de mesmo ISPB: invalida o teste mesmo com Result PASSED no FVP.
+    const sameIspbGuard = buildSameIspbGuard(fileName, meta, transmissoraEncontrada, validationIcons);
+    if (sameIspbGuard.blocked) testPassed = false;
+
     const borderStatusClass = testPassed ? 'report-passed' : 'report-failed';
     const dataStatus = testPassed ? 'passed' : 'failed';
 
@@ -2672,6 +2852,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         ${sigcCheckId ? `<div class="sigc-result" id="sigc-result-${sigcCheckId}" hidden></div>` : ''}
 
         ${validacaoInstHtml}
+        ${sameIspbGuard.blocked ? '' : sameIspbGuard.html}
         ${ispbValidation.html}
         ${resolutionHintHtml}
         ${validacaoHtml}
@@ -2744,7 +2925,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
     }
 
     html += `</div>`;
-    return { html, isPassed: testPassed };
+    return { html, isPassed: testPassed, sameIspbAlert: sameIspbGuard.blocked ? sameIspbGuard.alert : null };
 }
 
 // -------------------------------------------------------------
