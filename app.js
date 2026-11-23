@@ -2400,9 +2400,42 @@ function extractMetadata(htmlString) {
     // Resultado oficial do FVP no topo do log: <span class="label testResult-passed">PASSED</span>
     const fvpResultMatch = htmlString.match(/class=["'][^"']*\btestResult-([a-z]+)\b[^"']*["'][^>]*>\s*([A-Z_]+)\s*</i);
     const fvpResult = fvpResultMatch ? (fvpResultMatch[2] || fvpResultMatch[1]).toUpperCase() : '';
+    // Pagamentos Pix rejeitados: status RJCT + rejectionReason { code, detail } no corpo da resposta.
+    const extractPixRejections = () => {
+        // Usa o texto decodificado; a âncora é o <table id="..."> mais próximo antes do RJCT.
+        const text = decodeHtmlEntities(htmlString);
+        const clean = str => str;
+        const found = [];
+        const byKey = new Map();
+        const statusRegex = /"status"\s*:\s*"RJCT"/g;
+        const pick = (src, key) => {
+            const v = src && src.match(new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`));
+            return v ? v[1].trim() : '';
+        };
+        let m;
+        while ((m = statusRegex.exec(text)) !== null) {
+            // Objeto (sem chaves aninhadas) que contém o status RJCT, ex.: additionalInfo do FVP
+            const start = text.lastIndexOf('{', m.index);
+            const endIdx = text.indexOf('}', m.index);
+            const obj = start >= 0 && endIdx >= 0 ? clean(text.slice(start + 1, endIdx)) : '';
+            const window = clean(text.slice(Math.max(0, m.index - 3000), m.index + 3000));
+            // Formato FVP: rejectionReasonCode / rejectionReasonDetail; alternativo: rejectionReason { code, detail }
+            const nested = window.match(/"rejectionReason"\s*:\s*\{([^{}]*)\}/)?.[1];
+            const code = pick(obj, 'rejectionReasonCode') || pick(nested, 'code');
+            const detail = pick(obj, 'rejectionReasonDetail') || pick(nested, 'detail');
+            const key = `${code}|${detail}`;
+            if (byKey.has(key)) { byKey.get(key).count++; continue; }
+            const tables = [...text.slice(0, m.index).matchAll(/<table[^>]*\sid=["']([^"']+)["'][^>]*>/gi)];
+            const entry = { code, detail, logAnchor: tables.at(-1)?.[1] || '', count: 1 };
+            byKey.set(key, entry);
+            found.push(entry);
+        }
+        return found;
+    };
+    const pixRejections = extractPixRejections();
     const executionCreatedDate = extractHeaderDate('Created');
     const exportedDate = extractHeaderDate('Exported');
-    
+
     // 2. Passa o alias para garantir que as buscas sejam isoladas por marca correta
     const definitiveData = extractDefinitiveAsId(htmlString, alias);
     const authServerInferido = inferAuthServerFromLog(htmlString, alias);
@@ -2503,6 +2536,7 @@ function extractMetadata(htmlString) {
         runCycle: runMetadata.cycle,
         sdTicket: runMetadata.sdTicket,
         fvpResult,
+        pixRejections,
         executionCreatedUtc: executionCreatedDate?.toISOString() || '',
         executionCreatedBrasilia: formatBrasiliaDate(executionCreatedDate),
         exportedBrasilia: formatBrasiliaDate(exportedDate),
@@ -2804,6 +2838,20 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
             </ul>
         </div>` : '';
 
+    const pixRejectionHtml = (meta.pixRejections || []).length ? `
+        <div class="failure-summary-card pix-rjct-card">
+            <strong>Pagamento rejeitado (RJCT):</strong>
+            <ul>
+                ${meta.pixRejections.map(r => `
+                    <li>
+                        <span><strong>Código:</strong> ${escapeHtml(r.code || 'não informado')}</span><br>
+                        <span><strong>Detalhe:</strong> ${escapeHtml(r.detail || 'não informado')}</span>
+                        ${r.count > 1 ? `<br><span class="validation-note">Ocorre ${r.count} vezes no log; o link abre a primeira.</span>` : ''}
+                        ${r.logAnchor ? `<div class="failure-request-origin"><a class="failure-summary-link" href="${htmlBlobUrl}#${encodeURIComponent(r.logAnchor)}" target="_blank">Ir para o RJCT no log</a></div>` : ''}
+                    </li>`).join('')}
+            </ul>
+        </div>` : '';
+
     // Dados enviados para a correlação com o SIGC Retestes (extensão do navegador)
     const sigcCheckId = registerSigcPayload({
         fileName,
@@ -2856,6 +2904,7 @@ function generateFileBlock(fileName, meta, resultados, evidencias, htmlBlobUrl, 
         ${ispbValidation.html}
         ${resolutionHintHtml}
         ${validacaoHtml}
+        ${pixRejectionHtml}
         ${failureSummaryHtml}
 
         ${SHOW_LOG_METADATA ? `
